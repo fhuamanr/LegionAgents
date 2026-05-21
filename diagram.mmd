@@ -1,0 +1,18 @@
+flowchart TB
+
+A[Task Input] --> B[Context Loader]
+
+B --> C[Agent Rules]
+B --> D[Architecture]
+B --> E[Memory]
+B --> F[Current Task]
+
+C --> G[Prompt Builder]
+
+D --> G
+E --> G
+F --> G
+
+G --> H[Codex / LLM]
+
+H --> I[Structured Output]

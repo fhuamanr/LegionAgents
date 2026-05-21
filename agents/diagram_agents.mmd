@@ -1,0 +1,26 @@
+sequenceDiagram
+
+participant User
+participant BA
+participant Architect
+participant Dev
+participant QA
+participant Docs
+participant PR
+
+User->>BA: REQ
+BA->>Architect: Historias
+
+Architect->>Dev: Diseño técnico
+
+Dev->>QA: Código + tests
+
+QA-->>Dev: Bugs encontrados
+Dev->>QA: Correcciones
+
+QA->>Docs: Validación OK
+Dev->>Docs: Código final
+
+Docs->>PR: Documentación
+
+PR->>User: Pull Request listo

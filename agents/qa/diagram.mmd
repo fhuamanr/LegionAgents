@@ -1,0 +1,11 @@
+flowchart TB
+
+A[PR / Código] --> B[Lee historia]
+B --> C[Genera test cases]
+C --> D[Genera unit tests]
+D --> E[Genera e2e]
+E --> F[Ejecuta Playwright]
+F --> G[Ejecuta Selenium]
+G --> H[Analiza resultados]
+H --> I[Reporta bugs]
+I --> J[Dev]
