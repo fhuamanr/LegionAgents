@@ -43,6 +43,134 @@ workflows/               Future workflow definitions
 outputs/                 Generated local runtime outputs
 ```
 
+## Solution Diagrams
+
+### Platform Layers
+
+```mermaid
+flowchart TB
+  User["User / Delivery Lead"] --> Frontend["Next.js Dashboard"]
+  Frontend --> Api["FastAPI Backend"]
+  Frontend -. "WebSocket events" .-> Streaming["Streaming Layer"]
+
+  Api --> Graph["LangGraph Orchestration"]
+  Graph --> Runtime["Agent Runtime Foundation"]
+  Runtime --> Agents["Specialized Agent Runtimes"]
+
+  Agents --> BA["BA Agent"]
+  Agents --> Architect["Architect Agent"]
+  Agents --> Developer["Developer Agent"]
+  Agents --> QA["QA Agent"]
+  Agents --> Docs["Docs Agent"]
+  Agents --> PR["PR Agent"]
+
+  Runtime --> Context["Context Engineering"]
+  Runtime --> Memory["Shared Memory"]
+  Runtime --> Governance["Governance Engine"]
+  Runtime --> Contracts["Output Contracts"]
+
+  Context --> Rules["Markdown Rules and Standards"]
+  Memory --> LocalStore["Local In-Memory Persistence"]
+  Streaming --> Timeline["Execution Timelines"]
+  Streaming --> Logs["Structured Logs"]
+```
+
+### Delivery Workflow
+
+```mermaid
+flowchart LR
+  BA["BA: user stories and acceptance criteria"] --> Architect["Architect: architecture context"]
+  Architect --> Developer["Developer: code, tests, refactor plan, PR draft"]
+  Developer --> QA["QA: tests, browser evidence, bug reports"]
+  QA -->|approved| Docs["Docs: generated documentation"]
+  QA -->|rejected with bugs| Developer
+  Docs --> PR["PR: GitLab-ready summary"]
+```
+
+### Agent Runtime Execution
+
+```mermaid
+sequenceDiagram
+  participant Graph as LangGraph Node
+  participant Executor as AgentExecutor
+  participant Context as ContextAssembler
+  participant Prompts as PromptBuilder
+  participant Agent as BaseAgent Runtime
+  participant Validator as OutputValidator
+  participant Retry as RetryEngine
+  participant Stream as Event Bus
+
+  Graph->>Executor: Execute isolated agent task
+  Executor->>Stream: agent_started
+  Executor->>Context: Assemble agent-specific context
+  Context-->>Executor: Context package
+  Executor->>Prompts: Compose modular prompt
+  Prompts-->>Executor: Prompt bundle
+  Executor->>Agent: Run async execution
+  Agent-->>Executor: Structured output candidate
+  Executor->>Validator: Validate output contract
+  alt valid output
+    Validator-->>Executor: Accepted result
+    Executor->>Stream: agent_completed
+    Executor-->>Graph: Agent node result
+  else invalid or retryable failure
+    Validator-->>Executor: Validation errors
+    Executor->>Retry: Apply retry policy
+    Retry->>Stream: retry_started
+    Retry-->>Executor: Retry decision
+  end
+```
+
+### Context, Memory, and Governance
+
+```mermaid
+flowchart TB
+  Task["Agent Task"] --> Selection["Dynamic Context Selection"]
+  Selection --> Repo["Repository Summaries"]
+  Selection --> Markdown["Markdown Rule Loading"]
+  Selection --> AgentMemory["Agent-Isolated Memory"]
+  Selection --> ThreadMemory["Thread-Aware Memory"]
+
+  Repo --> Budget["Token Budgeting"]
+  Markdown --> Budget
+  AgentMemory --> Budget
+  ThreadMemory --> Budget
+
+  Budget --> Compression["Context Compression"]
+  Compression --> Isolation["Context Isolation Guard"]
+
+  Governance["Governance Engine"] --> GlobalRules["Global Policies"]
+  Governance --> LocalRules["Agent Local Rules"]
+  GlobalRules --> Merge["Policy Merge and Priority Resolution"]
+  LocalRules --> Merge
+  Merge --> Validation["Runtime Policy Validation"]
+
+  Isolation --> Prompt["Prompt Bundle"]
+  Validation --> Prompt
+```
+
+### Dashboard and Streaming
+
+```mermaid
+flowchart LR
+  FastAPI["FastAPI APIs"] --> Snapshot["Dashboard Snapshot"]
+  FastAPI --> Reports["QA / Docs / PR APIs"]
+  EventBus["Execution Event Bus"] --> WS["WebSocket Adapter"]
+
+  Snapshot --> UI["Next.js Dashboard"]
+  Reports --> UI
+  WS --> UI
+
+  UI --> WorkflowView["Workflow Map"]
+  UI --> AgentStatus["Agent Status"]
+  UI --> Timeline["Execution Timeline"]
+  UI --> Logs["Live Logs"]
+  UI --> QAReports["QA Reports and Screenshots"]
+  UI --> DocsView["Generated Docs"]
+  UI --> PRView["PR Visualization"]
+  UI --> MermaidView["Mermaid Graphs"]
+```
+
 ## Current Capabilities
 
 - Typed Pydantic contracts for agents, artifacts, context, execution, memory, prompts, outputs, and workflow state.
