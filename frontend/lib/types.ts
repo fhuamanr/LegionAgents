@@ -1,0 +1,120 @@
+export type AgentKey = "ba" | "architect" | "developer" | "qa" | "docs" | "pr";
+
+export type AgentStatus = "idle" | "running" | "blocked" | "completed" | "failed";
+
+export type WorkflowStageStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "rejected"
+  | "failed";
+
+export type Severity = "critical" | "high" | "medium" | "low" | "info";
+
+export interface AgentSummary {
+  readonly key: AgentKey;
+  readonly name: string;
+  readonly status: AgentStatus;
+  readonly currentTask: string;
+  readonly lastEventAt: string;
+  readonly retryCount: number;
+}
+
+export interface WorkflowStage {
+  readonly id: AgentKey;
+  readonly label: string;
+  readonly status: WorkflowStageStatus;
+  readonly startedAt?: string;
+  readonly completedAt?: string;
+  readonly metadata: Record<string, string | number | boolean>;
+}
+
+export interface ExecutionEvent {
+  readonly id: string;
+  readonly type:
+    | "agent_started"
+    | "agent_completed"
+    | "agent_failed"
+    | "retry_started"
+    | "QA_failed"
+    | "PR_generated"
+    | "docs_generated";
+  readonly agent: AgentKey;
+  readonly message: string;
+  readonly timestamp: string;
+  readonly severity: Severity;
+}
+
+export interface TimelineItem {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly timestamp: string;
+  readonly status: WorkflowStageStatus;
+}
+
+export interface LogEntry {
+  readonly id: string;
+  readonly timestamp: string;
+  readonly level: "debug" | "info" | "warning" | "error";
+  readonly source: string;
+  readonly message: string;
+}
+
+export interface QaBug {
+  readonly id: string;
+  readonly title: string;
+  readonly severity: Severity;
+  readonly status: "open" | "triaged" | "fixed" | "accepted";
+  readonly evidence: string;
+}
+
+export interface QaReport {
+  readonly executionId: string;
+  readonly status: "passed" | "failed" | "running";
+  readonly coveragePercent: number;
+  readonly unitTests: number;
+  readonly integrationTests: number;
+  readonly browserTests: number;
+  readonly bugs: readonly QaBug[];
+  readonly screenshots: readonly ScreenshotArtifact[];
+}
+
+export interface ScreenshotArtifact {
+  readonly id: string;
+  readonly title: string;
+  readonly path: string;
+  readonly capturedAt: string;
+}
+
+export interface DocumentationArtifact {
+  readonly id: string;
+  readonly title: string;
+  readonly status: "draft" | "generated" | "published";
+  readonly updatedAt: string;
+  readonly summary: string;
+}
+
+export interface PullRequestSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly status: "draft" | "ready" | "merged";
+  readonly branch: string;
+  readonly target: string;
+  readonly changedFiles: number;
+  readonly riskLevel: Severity;
+  readonly summary: string;
+}
+
+export interface DashboardSnapshot {
+  readonly workflowId: string;
+  readonly agents: readonly AgentSummary[];
+  readonly stages: readonly WorkflowStage[];
+  readonly events: readonly ExecutionEvent[];
+  readonly timeline: readonly TimelineItem[];
+  readonly logs: readonly LogEntry[];
+  readonly qaReport: QaReport;
+  readonly docs: readonly DocumentationArtifact[];
+  readonly pullRequest: PullRequestSummary;
+  readonly mermaid: string;
+}

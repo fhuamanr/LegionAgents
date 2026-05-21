@@ -1,0 +1,206 @@
+import type { DashboardSnapshot } from "./types";
+
+const now = new Date("2026-05-21T15:40:00-05:00");
+
+function minutesAgo(minutes: number): string {
+  return new Date(now.getTime() - minutes * 60_000).toISOString();
+}
+
+export const mockDashboardSnapshot: DashboardSnapshot = {
+  workflowId: "wf-enterprise-001",
+  agents: [
+    {
+      key: "ba",
+      name: "Business Analyst",
+      status: "completed",
+      currentTask: "Story contract generated",
+      lastEventAt: minutesAgo(48),
+      retryCount: 0,
+    },
+    {
+      key: "architect",
+      name: "Architect",
+      status: "completed",
+      currentTask: "Architecture context approved",
+      lastEventAt: minutesAgo(37),
+      retryCount: 0,
+    },
+    {
+      key: "developer",
+      name: "Developer",
+      status: "running",
+      currentTask: "Generating implementation plan",
+      lastEventAt: minutesAgo(4),
+      retryCount: 1,
+    },
+    {
+      key: "qa",
+      name: "QA",
+      status: "idle",
+      currentTask: "Waiting for developer output",
+      lastEventAt: minutesAgo(9),
+      retryCount: 0,
+    },
+    {
+      key: "docs",
+      name: "Docs",
+      status: "idle",
+      currentTask: "Waiting for QA approval",
+      lastEventAt: minutesAgo(18),
+      retryCount: 0,
+    },
+    {
+      key: "pr",
+      name: "PR",
+      status: "idle",
+      currentTask: "Draft pending",
+      lastEventAt: minutesAgo(18),
+      retryCount: 0,
+    },
+  ],
+  stages: [
+    { id: "ba", label: "BA", status: "completed", completedAt: minutesAgo(48), metadata: { stories: 3 } },
+    { id: "architect", label: "Architect", status: "completed", completedAt: minutesAgo(37), metadata: { decisions: 5 } },
+    { id: "developer", label: "Developer", status: "running", startedAt: minutesAgo(35), metadata: { files: 12 } },
+    { id: "qa", label: "QA", status: "pending", metadata: { gates: 4 } },
+    { id: "docs", label: "Docs", status: "pending", metadata: { artifacts: 2 } },
+    { id: "pr", label: "PR", status: "pending", metadata: { provider: "GitLab" } },
+  ],
+  events: [
+    {
+      id: "evt-1",
+      type: "agent_started",
+      agent: "developer",
+      message: "Developer agent isolated context loaded.",
+      timestamp: minutesAgo(35),
+      severity: "info",
+    },
+    {
+      id: "evt-2",
+      type: "retry_started",
+      agent: "developer",
+      message: "Retry policy started after output contract validation warning.",
+      timestamp: minutesAgo(7),
+      severity: "medium",
+    },
+    {
+      id: "evt-3",
+      type: "agent_started",
+      agent: "qa",
+      message: "QA gate queued for execution.",
+      timestamp: minutesAgo(3),
+      severity: "info",
+    },
+  ],
+  timeline: [
+    {
+      id: "tl-1",
+      title: "Story package accepted",
+      description: "BA output contract validated with acceptance criteria.",
+      timestamp: minutesAgo(52),
+      status: "completed",
+    },
+    {
+      id: "tl-2",
+      title: "Architecture context assembled",
+      description: "Dependency graph and constraints handed to developer runtime.",
+      timestamp: minutesAgo(37),
+      status: "completed",
+    },
+    {
+      id: "tl-3",
+      title: "Developer generation in progress",
+      description: "Structured implementation output is being generated.",
+      timestamp: minutesAgo(4),
+      status: "running",
+    },
+    {
+      id: "tl-4",
+      title: "QA execution pending",
+      description: "Unit, integration, browser, and evidence collection gates are queued.",
+      timestamp: minutesAgo(1),
+      status: "pending",
+    },
+  ],
+  logs: [
+    {
+      id: "log-1",
+      timestamp: minutesAgo(9),
+      level: "info",
+      source: "runtime.developer",
+      message: "PromptBuilder composed rules: gravity, anti-gravity, standards, testing, security.",
+    },
+    {
+      id: "log-2",
+      timestamp: minutesAgo(7),
+      level: "warning",
+      source: "runtime.validator",
+      message: "Output contract required retry: missing test generation section.",
+    },
+    {
+      id: "log-3",
+      timestamp: minutesAgo(4),
+      level: "info",
+      source: "graph.supervisor",
+      message: "Developer node resumed with retry metadata.",
+    },
+  ],
+  qaReport: {
+    executionId: "qa-run-001",
+    status: "running",
+    coveragePercent: 82,
+    unitTests: 48,
+    integrationTests: 12,
+    browserTests: 6,
+    bugs: [
+      {
+        id: "bug-001",
+        title: "QA gate waiting for executable artifact",
+        severity: "info",
+        status: "triaged",
+        evidence: "No blocking failure; QA is queued after developer output validation.",
+      },
+    ],
+    screenshots: [
+      {
+        id: "shot-001",
+        title: "Dashboard shell smoke capture",
+        path: "/placeholder-screenshot.svg",
+        capturedAt: minutesAgo(2),
+      },
+    ],
+  },
+  docs: [
+    {
+      id: "doc-1",
+      title: "Architecture Decision Log",
+      status: "generated",
+      updatedAt: minutesAgo(22),
+      summary: "Captures orchestration, runtime, context, governance, and streaming decisions.",
+    },
+    {
+      id: "doc-2",
+      title: "Developer Runtime Notes",
+      status: "draft",
+      updatedAt: minutesAgo(13),
+      summary: "Summarizes prompt composition, context boundaries, and retry-safe execution.",
+    },
+  ],
+  pullRequest: {
+    id: "pr-1042",
+    title: "Draft: multi-agent runtime foundation",
+    status: "draft",
+    branch: "feature/runtime-foundation",
+    target: "main",
+    changedFiles: 38,
+    riskLevel: "medium",
+    summary: "Includes contracts, runtime, memory, graph orchestration, QA system, governance, streaming, and API shell.",
+  },
+  mermaid: `flowchart LR
+  BA["BA"] --> Architect["Architect"]
+  Architect --> Developer["Developer"]
+  Developer --> QA["QA"]
+  QA -->|approved| Docs["Docs"]
+  QA -->|rejected| Developer
+  Docs --> PR["PR"]`,
+};
