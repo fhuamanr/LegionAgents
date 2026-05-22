@@ -14,9 +14,8 @@ from core.contracts.qa_sandbox import (
 )
 from core.qa_sandbox.drivers import (
     BrowserSandboxDriver,
-    NoopPlaywrightSandboxDriver,
-    NoopSeleniumSandboxDriver,
-    _NoopBrowserSandboxDriver,
+    PlaywrightSandboxDriver,
+    SeleniumSandboxDriver,
 )
 from core.qa_sandbox.sessions import SandboxSessionManager
 
@@ -32,8 +31,8 @@ class QASandboxExecutor:
     ) -> None:
         self._session_manager = session_manager or SandboxSessionManager()
         self._drivers = drivers or {
-            SandboxBrowserEngine.PLAYWRIGHT: NoopPlaywrightSandboxDriver(),
-            SandboxBrowserEngine.SELENIUM: NoopSeleniumSandboxDriver(),
+            SandboxBrowserEngine.PLAYWRIGHT: PlaywrightSandboxDriver(),
+            SandboxBrowserEngine.SELENIUM: SeleniumSandboxDriver(),
         }
         self._logger = logger or logging.getLogger(__name__)
 
@@ -102,9 +101,8 @@ class QASandboxExecutor:
             if not result.success:
                 raise RuntimeError(result.message or f"Sandbox step failed: {step.action.value}")
 
-        if isinstance(driver, _NoopBrowserSandboxDriver):
-            final_artifacts = await driver.finalize(session, tuple(step_results))
-            artifacts.extend(final_artifacts)
+        final_artifacts = await driver.finalize(session, tuple(step_results))
+        artifacts.extend(final_artifacts)
 
         status = SandboxExecutionStatus.PASSED if all(result.success for result in step_results) else SandboxExecutionStatus.FAILED
         return SandboxExecutionResult(

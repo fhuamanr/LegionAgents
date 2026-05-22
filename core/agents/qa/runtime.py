@@ -1,6 +1,9 @@
 """Autonomous QA Agent runtime."""
 
+import asyncio
 import logging
+import shlex
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
@@ -16,8 +19,17 @@ from core.contracts.agents import AgentDefinition, AgentStatus
 from core.contracts.artifacts import Artifact, ArtifactKind
 from core.contracts.context import ContextLoadRequest
 from core.contracts.execution import AgentExecutionRequest, AgentExecutionResult
-from core.contracts.outputs import OutputContract, QAOutput, ScreenshotEvidence
+from core.contracts.outputs import ExecutionLog, OutputContract, OutputSeverity, QAOutput, QualityFinding, ScreenshotEvidence, TestReport
+from core.contracts.qa_sandbox import SandboxBrowserEngine, SandboxExecutionConfig, SandboxStep, SandboxStepAction
+from core.qa_sandbox import QASandboxExecutor
 from core.runtime.retry import RetryEngine, RetryPolicy
+
+
+@dataclass(frozen=True, slots=True)
+class CommandResult:
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 class QAAgentRuntime(AgentRuntime):
@@ -32,6 +44,7 @@ class QAAgentRuntime(AgentRuntime):
         output_parser: QAOutputParser | None = None,
         browser_service: BrowserAutomationService | None = None,
         severity_classifier: SeverityClassifier | None = None,
+        sandbox_executor: QASandboxExecutor | None = None,
         retry_engine: RetryEngine | None = None,
         telemetry_hook: QATelemetryHook | None = None,
         logger: logging.Logger | None = None,
@@ -43,6 +56,7 @@ class QAAgentRuntime(AgentRuntime):
         self._output_parser = output_parser or QAOutputParser()
         self._browser_service = browser_service or BrowserAutomationService()
         self._severity_classifier = severity_classifier or SeverityClassifier()
+        self._sandbox_executor = sandbox_executor or QASandboxExecutor()
         self._retry_engine = retry_engine or RetryEngine(RetryPolicy(max_attempts=2))
         self._telemetry_hook = telemetry_hook or NoopQATelemetryHook()
         self._logger = logger or logging.getLogger(f"{__name__}.{config.agent_name}")
@@ -82,7 +96,7 @@ class QAAgentRuntime(AgentRuntime):
                 raw_output=raw_output,
                 agent_name=self._config.agent_name,
             )
-            structured_output = await self._enrich_output(structured_output)
+            structured_output = await self._enrich_output(structured_output, request)
         except ValidationError as exc:
             return self._failed_result(
                 request=request,
@@ -154,7 +168,9 @@ class QAAgentRuntime(AgentRuntime):
             model_client=model_client,
         )
 
-    async def _enrich_output(self, output: QAOutput) -> QAOutput:
+    async def _enrich_output(self, output: QAOutput, request: AgentExecutionRequest) -> QAOutput:
+        output = await self._run_test_commands(output)
+        output = await self._run_browser_sandbox(output, request)
         screenshots = list(output.screenshots)
         if not screenshots and output.bug_summaries:
             factory = ScreenshotPathFactory(self._config.evidence_output_path)
@@ -187,6 +203,139 @@ class QAAgentRuntime(AgentRuntime):
                 "screenshots": tuple(screenshots),
                 "bug_summaries": tuple(bug_summaries),
             }
+        )
+
+    async def _run_test_commands(self, output: QAOutput) -> QAOutput:
+        reports: list[TestReport] = []
+        logs: list[ExecutionLog] = list(output.execution_logs)
+        findings: list[QualityFinding] = list(output.findings)
+        passed = output.passed
+
+        for report in output.test_reports:
+            if not report.command:
+                reports.append(report)
+                continue
+            try:
+                result = await self._run_command(report.command)
+            except Exception as exc:
+                result = CommandResult(returncode=1, stdout="", stderr=str(exc))
+            command_passed = result.returncode == 0
+            passed = passed and command_passed
+            logs.append(
+                ExecutionLog(
+                    message=f"$ {report.command}\n{result.stdout}\n{result.stderr}".strip(),
+                    level="info" if command_passed else "error",
+                    source="qa-test-runner",
+                )
+            )
+            reports.append(
+                report.model_copy(
+                    update={
+                        "passed": max(report.passed, 1 if command_passed else 0),
+                        "failed": max(report.failed, 0 if command_passed else 1),
+                        "details": (result.stdout + "\n" + result.stderr).strip() or report.details,
+                    }
+                )
+            )
+            if not command_passed:
+                findings.append(
+                    QualityFinding(
+                        id=f"QA-CMD-{len(findings) + 1:03d}",
+                        title=f"Test command failed: {report.name}",
+                        severity=OutputSeverity.HIGH,
+                        evidence=(result.stderr or result.stdout or "Command returned non-zero exit code.").strip(),
+                        recommendation="Inspect the failing test output and fix the implementation before approval.",
+                    )
+                )
+
+        return output.model_copy(
+            update={
+                "test_reports": tuple(reports),
+                "execution_logs": tuple(logs),
+                "findings": tuple(findings),
+                "passed": passed,
+            }
+        )
+
+    async def _run_browser_sandbox(self, output: QAOutput, request: AgentExecutionRequest) -> QAOutput:
+        sandbox_steps = output.metadata.get("sandbox_steps") or request.metadata.get("sandbox_steps")
+        if not sandbox_steps:
+            return output
+        steps = tuple(self._sandbox_step(item) for item in sandbox_steps)
+        engine = SandboxBrowserEngine(str(output.metadata.get("sandbox_engine") or request.metadata.get("sandbox_engine") or SandboxBrowserEngine.PLAYWRIGHT))
+        result = await self._sandbox_executor.execute(
+            config=SandboxExecutionConfig(engine=engine),
+            steps=steps,
+            agent_name=self._config.agent_name,
+            thread_id=str(request.metadata.get("thread_id", request.workflow_id)),
+        )
+        screenshots = list(output.screenshots)
+        logs = list(output.execution_logs)
+        findings = list(output.findings)
+        for artifact in result.artifacts:
+            if artifact.kind.value == "screenshot":
+                screenshots.append(
+                    ScreenshotEvidence(
+                        name=artifact.name,
+                        path=artifact.path.as_posix(),
+                        description=artifact.description,
+                    )
+                )
+        logs.extend(
+            ExecutionLog(message=log, level="info", source="qa-browser-sandbox")
+            for log in result.logs
+        )
+        if result.errors:
+            findings.append(
+                QualityFinding(
+                    id=f"QA-BROWSER-{len(findings) + 1:03d}",
+                    title="Browser automation failed",
+                    severity=OutputSeverity.HIGH,
+                    evidence="\n".join(result.errors),
+                    recommendation="Review browser evidence and reproduce the failing interaction.",
+                )
+            )
+        report = TestReport(
+            name=f"{engine.value}-browser-automation",
+            test_type="browser",
+            passed=1 if not result.errors else 0,
+            failed=0 if not result.errors else 1,
+            details="\n".join(result.logs + result.errors),
+        )
+        return output.model_copy(
+            update={
+                "screenshots": tuple(screenshots),
+                "execution_logs": tuple(logs),
+                "findings": tuple(findings),
+                "test_reports": output.test_reports + (report,),
+                "passed": output.passed and not result.errors,
+            }
+        )
+
+    async def _run_command(self, command: str) -> CommandResult:
+        args = shlex.split(command, posix=False)
+        if not args:
+            raise ValueError("QA test command cannot be empty.")
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=self._config.repository_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        return CommandResult(
+            returncode=process.returncode,
+            stdout=stdout.decode("utf-8", errors="replace"),
+            stderr=stderr.decode("utf-8", errors="replace"),
+        )
+
+    def _sandbox_step(self, payload: dict) -> SandboxStep:
+        return SandboxStep(
+            action=SandboxStepAction(str(payload["action"])),
+            target=payload.get("target"),
+            value=payload.get("value"),
+            description=payload.get("description") or str(payload["action"]),
+            metadata=payload.get("metadata", {}),
         )
 
     def _load_required_rules(self) -> tuple[dict[str, str], tuple[str, ...]]:

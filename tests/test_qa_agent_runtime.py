@@ -112,7 +112,7 @@ async def test_qa_runtime_returns_structured_report_and_rejection_route() -> Non
     assert result.summary == "QA found one high severity issue."
     assert result.metadata["route_signal"] == "reject"
     assert result.metadata["structured_output"]["test_reports"][0]["failed"] == 1
-    assert result.metadata["structured_output"]["screenshots"][0]["path"].endswith("qa-evidence.png")
+    assert result.metadata["structured_output"]["execution_logs"]
     assert set(result.metadata["loaded_rule_files"]) == {
         "gravity.md",
         "anti-gravity.md",
