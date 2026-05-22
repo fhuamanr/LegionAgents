@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from app.dependencies.container import get_execution_service
-from app.schemas import ExecutionLogResponse, ExecutionStatusResponse
+from app.schemas import ExecutionLogResponse, ExecutionStatusResponse, WorkflowTelemetryResponse
 from app.services.execution_service import ExecutionService
 
 router = APIRouter(prefix="/executions", tags=["executions"])
@@ -26,3 +26,10 @@ async def get_execution_logs(
 ) -> ExecutionLogResponse:
     return await service.get_logs(workflow_id)
 
+
+@router.get("/{workflow_id}/telemetry", response_model=WorkflowTelemetryResponse)
+async def get_workflow_telemetry(
+    workflow_id: UUID,
+    service: ExecutionService = Depends(get_execution_service),
+) -> WorkflowTelemetryResponse:
+    return await service.get_workflow_telemetry(workflow_id)

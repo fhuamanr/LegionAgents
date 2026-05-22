@@ -50,6 +50,15 @@ def test_upload_trigger_status_logs_and_reports() -> None:
     logs = logs_response.json()
     assert any(event["type"] == "agent_started" for event in logs["events"])
 
+    telemetry_response = client.get(f"/executions/{workflow_id}/telemetry")
+    assert telemetry_response.status_code == 200
+    telemetry = telemetry_response.json()
+    assert telemetry["workflow_id"] == workflow_id
+    assert {node["id"] for node in telemetry["nodes"]} >= {"ba", "architect", "developer", "qa", "docs", "pr"}
+    assert any(edge["is_loop"] for edge in telemetry["edges"])
+    assert "QA -->|rejected retry| Developer" in telemetry["mermaid"]
+    assert telemetry["metadata"]["websocket_channel"] == f"/ws/executions/{workflow_id}"
+
     qa_response = client.get(f"/reports/qa/{workflow_id}")
     docs_response = client.get(f"/docs/generated/{workflow_id}")
     pr_response = client.get(f"/pr/summaries/{workflow_id}")

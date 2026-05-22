@@ -57,6 +57,50 @@ export interface TimelineItem {
   readonly status: WorkflowStageStatus;
 }
 
+export interface WorkflowTelemetryNode {
+  readonly id: AgentKey;
+  readonly label: string;
+  readonly agentName: AgentKey;
+  readonly status: "pending" | "running" | "paused" | "completed" | "failed";
+  readonly startedAt?: string;
+  readonly completedAt?: string;
+  readonly durationMs?: number;
+  readonly retryCount: number;
+  readonly metadata: Record<string, string | number | boolean>;
+}
+
+export interface WorkflowTelemetryEdge {
+  readonly source: AgentKey;
+  readonly target: AgentKey;
+  readonly label?: string;
+  readonly condition?: string;
+  readonly isLoop: boolean;
+  readonly metadata: Record<string, string | number | boolean>;
+}
+
+export interface WorkflowTelemetryTimelineItem {
+  readonly id: string;
+  readonly eventType: string;
+  readonly agentName?: AgentKey;
+  readonly message: string;
+  readonly timestamp: string;
+  readonly durationMs?: number;
+  readonly metadata: Record<string, string | number | boolean>;
+}
+
+export interface WorkflowTelemetrySnapshot {
+  readonly workflowId: string;
+  readonly status: "pending" | "running" | "paused" | "completed" | "failed";
+  readonly activeAgent?: AgentKey;
+  readonly progressPercent: number;
+  readonly durationMs: number;
+  readonly nodes: readonly WorkflowTelemetryNode[];
+  readonly edges: readonly WorkflowTelemetryEdge[];
+  readonly timeline: readonly WorkflowTelemetryTimelineItem[];
+  readonly mermaid: string;
+  readonly metadata: Record<string, string | number | boolean>;
+}
+
 export interface LogEntry {
   readonly id: string;
   readonly timestamp: string;
@@ -266,5 +310,6 @@ export interface DashboardSnapshot {
   readonly workspace: {
     readonly conversations: readonly WorkspaceConversationSummary[];
   };
+  readonly visualization: WorkflowTelemetrySnapshot;
   readonly mermaid: string;
 }

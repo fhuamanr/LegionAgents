@@ -379,6 +379,47 @@ export const mockDashboardSnapshot: DashboardSnapshot = {
       },
     ],
   },
+  visualization: {
+    workflowId: "wf-enterprise-001",
+    status: "running",
+    activeAgent: "developer",
+    progressPercent: 46,
+    durationMs: 286000,
+    nodes: [
+      { id: "ba", label: "BA", agentName: "ba", status: "completed", startedAt: minutesAgo(56), completedAt: minutesAgo(48), durationMs: 480000, retryCount: 0, metadata: { dependencyIndex: 0 } },
+      { id: "architect", label: "Architect", agentName: "architect", status: "completed", startedAt: minutesAgo(47), completedAt: minutesAgo(37), durationMs: 600000, retryCount: 0, metadata: { dependencyIndex: 1 } },
+      { id: "developer", label: "Developer", agentName: "developer", status: "running", startedAt: minutesAgo(35), durationMs: 2100000, retryCount: 1, metadata: { dependencyIndex: 2 } },
+      { id: "qa", label: "QA", agentName: "qa", status: "pending", retryCount: 0, metadata: { dependencyIndex: 3 } },
+      { id: "docs", label: "Docs", agentName: "docs", status: "pending", retryCount: 0, metadata: { dependencyIndex: 4 } },
+      { id: "pr", label: "PR", agentName: "pr", status: "pending", retryCount: 0, metadata: { dependencyIndex: 5 } },
+    ],
+    edges: [
+      { source: "ba", target: "architect", label: "requirements", isLoop: false, metadata: {} },
+      { source: "architect", target: "developer", label: "architecture", isLoop: false, metadata: {} },
+      { source: "developer", target: "qa", label: "implementation", isLoop: false, metadata: {} },
+      { source: "qa", target: "docs", label: "approved", condition: "qa_passed", isLoop: false, metadata: {} },
+      { source: "qa", target: "developer", label: "rejected", condition: "qa_failed", isLoop: true, metadata: {} },
+      { source: "docs", target: "pr", label: "documentation", isLoop: false, metadata: {} },
+    ],
+    timeline: [
+      { id: "vt-1", eventType: "agent_started", agentName: "ba", message: "BA started.", timestamp: minutesAgo(56), metadata: {} },
+      { id: "vt-2", eventType: "agent_completed", agentName: "ba", message: "BA completed.", timestamp: minutesAgo(48), durationMs: 480000, metadata: {} },
+      { id: "vt-3", eventType: "retry_started", agentName: "developer", message: "Developer retry started.", timestamp: minutesAgo(7), metadata: { retry: 1 } },
+    ],
+    mermaid: `flowchart LR
+  BA["BA (completed)"] --> Architect["Architect (completed)"]
+  Architect --> Developer["Developer (running)"]
+  Developer --> QA["QA (pending)"]
+  QA -->|approved| Docs["Docs (pending)"]
+  QA -->|rejected retry| Developer
+  Docs --> PR["PR (pending)"]`,
+    metadata: {
+      eventCount: 3,
+      retryCount: 1,
+      qaLoopCount: 0,
+      websocketChannel: "/ws/workflows/wf-enterprise-001/telemetry",
+    },
+  },
   mermaid: `flowchart LR
   BA["BA"] --> Architect["Architect"]
   Architect --> Developer["Developer"]

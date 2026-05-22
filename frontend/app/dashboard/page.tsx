@@ -9,6 +9,7 @@ import { ObservabilityPanel } from "@/features/observability/observability-panel
 import { GeneratedDocsViewer } from "@/features/docs/generated-docs-viewer";
 import { PrSummaryPanel } from "@/features/pr/pr-summary-panel";
 import { QaReportViewer } from "@/features/qa/qa-report-viewer";
+import { LiveWorkflowVisualization } from "@/features/workflows/live-workflow-visualization";
 import { WorkflowMap } from "@/features/workflows/workflow-map";
 import { getDashboardSnapshot } from "@/lib/api";
 
@@ -19,6 +20,7 @@ export default async function DashboardPage(): Promise<JSX.Element> {
     <AppShell>
       <div className="space-y-6">
         <MetricStrip snapshot={snapshot} />
+        <LiveWorkflowVisualization workflowId={snapshot.workflowId} snapshot={snapshot.visualization} />
         <WorkflowMap stages={snapshot.stages} />
         <AgentStatusGrid agents={snapshot.agents} />
         <ApprovalGatesPanel approvals={snapshot.approvals} />

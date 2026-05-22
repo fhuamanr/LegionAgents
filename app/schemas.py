@@ -71,6 +71,50 @@ class ExecutionLogResponse(ApiModel):
     events: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
 
 
+class WorkflowTelemetryNode(ApiModel):
+    id: str
+    label: str
+    agent_name: str
+    status: WorkflowStatus
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    duration_ms: int | None = None
+    retry_count: int = Field(default=0, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowTelemetryEdge(ApiModel):
+    source: str
+    target: str
+    label: str | None = None
+    condition: str | None = None
+    is_loop: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowTelemetryTimelineItem(ApiModel):
+    id: str
+    event_type: str
+    agent_name: str | None = None
+    message: str
+    timestamp: datetime
+    duration_ms: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowTelemetryResponse(ApiModel):
+    workflow_id: UUID
+    status: WorkflowStatus
+    active_agent: str | None = None
+    progress_percent: float
+    duration_ms: int
+    nodes: tuple[WorkflowTelemetryNode, ...] = Field(default_factory=tuple)
+    edges: tuple[WorkflowTelemetryEdge, ...] = Field(default_factory=tuple)
+    timeline: tuple[WorkflowTelemetryTimelineItem, ...] = Field(default_factory=tuple)
+    mermaid: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class AgentStatusResponse(ApiModel):
     agents: dict[str, WorkflowStatus]
 

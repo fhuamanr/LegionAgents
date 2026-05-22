@@ -1,5 +1,6 @@
 import { mockDashboardSnapshot } from "./mock-data";
-import type { DashboardSnapshot } from "./types";
+import { normalizeWorkflowTelemetry } from "./realtime";
+import type { DashboardSnapshot, WorkflowTelemetrySnapshot } from "./types";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -31,5 +32,17 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     return await requestJson<DashboardSnapshot>("/dashboard/snapshot");
   } catch {
     return mockDashboardSnapshot;
+  }
+}
+
+export async function getWorkflowTelemetry(workflowId: string): Promise<WorkflowTelemetrySnapshot> {
+  if (!apiBaseUrl) {
+    return mockDashboardSnapshot.visualization;
+  }
+
+  try {
+    return normalizeWorkflowTelemetry(await requestJson<Record<string, unknown>>(`/executions/${workflowId}/telemetry`));
+  } catch {
+    return mockDashboardSnapshot.visualization;
   }
 }

@@ -11,7 +11,39 @@ The platform is organized around specialized agents with isolated responsibiliti
 - `docs`
 - `pr`
 
-The implementation currently focuses on reusable platform infrastructure: contracts, AI workspace chat, user story ingestion, context engineering, shared memory, autonomous repository operations, runtime execution, LangGraph orchestration, QA sandboxing, human approvals, governance, observability, real-time execution streaming, FastAPI APIs, production deployment assets, and a frontend dashboard for monitoring workflows.
+The implementation currently focuses on reusable platform infrastructure: contracts, AI workspace chat, user story ingestion, context engineering, shared memory, autonomous repository operations, repository intelligence, runtime execution, LangGraph orchestration, QA sandboxing, human approvals, governance, observability, real-time execution streaming, FastAPI APIs, production deployment assets, and a frontend dashboard for monitoring live workflows.
+
+## Quick Start
+
+The default local runtime is Docker Compose. It starts the dashboard, backend APIs, LangGraph worker placeholder, PostgreSQL, Redis, Qdrant, MinIO, Playwright sandbox, Selenium sandbox, and Nginx reverse proxy.
+
+```powershell
+copy deployment\env\.env.compose.example .env.compose
+docker compose --env-file .env.compose up --build
+```
+
+Open the platform:
+
+```text
+Dashboard:        http://127.0.0.1:8080/dashboard
+Backend API:      http://127.0.0.1:8080/api/health
+Frontend direct:  http://127.0.0.1:3000/dashboard
+Backend direct:   http://127.0.0.1:8000/health
+MinIO console:    http://127.0.0.1:9001
+Selenium grid:    http://127.0.0.1:4444
+```
+
+Stop the platform:
+
+```powershell
+docker compose --env-file .env.compose down
+```
+
+Reset local service data:
+
+```powershell
+docker compose --env-file .env.compose down --volumes
+```
 
 ## Architecture
 
@@ -40,6 +72,7 @@ core/
   prompts/               Prompt composition primitives
   qa_sandbox/            Isolated Playwright/Selenium execution sandbox and artifacts
   repository/            Autonomous repository runtime, Git service, workspace manager, diff analyzer
+  repository_intelligence/ Repository scanning, framework detection, dependency graphing, and architecture summaries
   runtime/               Reusable base runtime architecture
   streaming/             Execution event bus, telemetry, timelines, and structured logging
 deployment/              Docker, Compose, production config, Kubernetes-ready manifests, deployment docs
@@ -176,56 +209,83 @@ flowchart TB
   Validation --> Prompt
 ```
 
-### Dashboard and Streaming
+### Live Workflow Visualization
 
 ```mermaid
 flowchart LR
-  FastAPI["FastAPI APIs"] --> Snapshot["Dashboard Snapshot"]
-  FastAPI --> Reports["QA / Docs / PR / Approval APIs"]
-  FastAPI --> ObservabilityApi["Observability APIs"]
-  EventBus["Execution Event Bus"] --> WS["WebSocket Adapter"]
+  Graph["LangGraph Workflow"] --> EventBus["Execution Event Bus"]
+  Runtime["Agent Runtime"] --> EventBus
+  Tracker["Execution Tracker"] --> Telemetry["Workflow Telemetry Snapshot"]
+  EventBus --> Tracker
+  EventBus --> Timeline["Timeline Generator"]
+  EventBus --> Logs["Structured Logs"]
 
-  Snapshot --> UI["Next.js Dashboard"]
-  Reports --> UI
-  ObservabilityApi --> UI
-  WS --> UI
+  Telemetry --> Api["GET /executions/{workflow_id}/telemetry"]
+  Timeline --> Api
+  Logs --> Api
+  EventBus --> WS["WS /ws/workflows/{workflow_id}/telemetry"]
+  EventBus --> EventWS["WS /ws/executions/{workflow_id}"]
 
-  UI --> WorkflowView["Workflow Map"]
-  UI --> AgentStatus["Agent Status"]
-  UI --> ApprovalView["Approval Gates"]
-  UI --> ObservabilityView["Observability"]
-  UI --> Timeline["Execution Timeline"]
-  UI --> Logs["Live Logs"]
-  UI --> QAReports["QA Reports and Screenshots"]
-  UI --> DocsView["Generated Docs"]
-  UI --> PRView["PR Visualization"]
-  UI --> MermaidView["Mermaid Graphs"]
+  Api --> Dashboard["Next.js Live Workflow Visualization"]
+  WS --> Dashboard
+  EventWS --> Dashboard
+
+  Dashboard --> Nodes["Execution Node Tracking"]
+  Dashboard --> Dependencies["Workflow Dependencies"]
+  Dashboard --> Mermaid["Mermaid Graph Rendering"]
+  Dashboard --> TimelineView["Timeline Visualization"]
+  Dashboard --> LogView["Live Logs"]
+
+  Nodes --> Active["Active Agents"]
+  Nodes --> Complete["Completed Agents"]
+  Nodes --> Failed["Failed Agents"]
+  Nodes --> Retries["Retries"]
+  Dependencies --> QALoop["QA Rejection Loop"]
 ```
 
-### Production Deployment
+### Docker Compose Platform
 
 ```mermaid
 flowchart TB
-  Browser["User Browser"] --> FrontendContainer["Frontend Container: Next.js"]
-  FrontendContainer --> BackendContainer["Backend Container: FastAPI"]
-  FrontendContainer -. "WebSocket" .-> BackendContainer
+  Browser["User Browser"] --> Nginx["Nginx Reverse Proxy :8080"]
+  Nginx --> Frontend["Frontend: Next.js :3000"]
+  Nginx --> Backend["FastAPI Backend :8000"]
+  Frontend --> Backend
+  Frontend -. "WebSocket" .-> Backend
 
-  BackendContainer --> OutputVolume["Workflow Output Volume"]
-  BackendContainer --> EventBus["Execution Event Bus"]
-  BackendContainer --> Observability["Observability Layer"]
-  BackendContainer --> QASandboxContainer["QA Sandbox Container"]
+  Backend --> LangGraph["LangGraph Runtime Worker"]
+  Backend --> Redis["Redis Checkpoint/Event Cache"]
+  Backend --> Postgres["PostgreSQL Platform Data"]
+  Backend --> Qdrant["Qdrant Vector Store"]
+  Backend --> MinIO["MinIO Artifact Storage"]
+  Backend --> Playwright["Playwright Sandbox"]
+  Backend --> Selenium["Selenium Sandbox"]
 
-  QASandboxContainer --> BrowserRuntime["Playwright / Selenium Runtime"]
-  QASandboxContainer --> QAArtifacts["QA Artifact Volume"]
+  Playwright --> QAArtifacts["QA Screenshots / Videos / Logs"]
+  Selenium --> QAArtifacts
+  QAArtifacts --> MinIO
 
-  Observability --> Prometheus["Prometheus-ready Metrics"]
-  Observability --> OTel["OpenTelemetry-ready Spans"]
-  Observability --> Datadog["Datadog-ready Payloads"]
-  Prometheus --> Grafana["Grafana-ready Dashboards"]
+  subgraph EdgeNetwork["edge network"]
+    Nginx
+    Frontend
+  end
 
-  BackendContainer -. "future" .-> Redis["Redis"]
-  BackendContainer -. "future" .-> Postgres["PostgreSQL"]
-  OutputVolume -. "future" .-> ObjectStorage["Object Storage"]
+  subgraph AppNetwork["app network"]
+    Backend
+    LangGraph
+  end
+
+  subgraph DataNetwork["data network"]
+    Redis
+    Postgres
+    Qdrant
+    MinIO
+  end
+
+  subgraph SandboxNetwork["sandbox network"]
+    Playwright
+    Selenium
+  end
 ```
 
 ## Current Capabilities
@@ -237,6 +297,7 @@ flowchart TB
 - Context engineering with dynamic selection, compression, token budgeting, repository summaries, architecture summaries, memory retrieval, and leakage prevention.
 - Shared memory system with short-term memory, long-term memory, execution history, ADR memory, bug memory, checkpoint-compatible records, namespaces, and vector-ready interfaces.
 - Autonomous Repository Engine with isolated workspaces, secure Git commands, cloning, branching, diff analysis, commit generation, PR preparation, and summaries.
+- Repository Intelligence Engine with local and mounted repository scanning, future GitHub ingestion boundary, framework detection, dependency graph generation, module relationship detection, and architecture summarization.
 - LangGraph orchestration with supervisor routing, conditional edges, retry loops, QA rejection loops, workflow transition metadata, and minimal shared graph state.
 - Reusable runtime foundation with `BaseAgent`, `AgentExecutor`, prompt building, context assembly, output validation, retry engine, logging hooks, and tool registry.
 - Executable Developer Agent runtime with dynamic markdown rule loading, repository analysis, structured outputs, retry-safe execution, and telemetry hooks.
@@ -245,11 +306,11 @@ flowchart TB
 - Human Approval Workflow with approval gates, manual reviews, retry approvals, PR approvals, QA override approvals, workflow pauses, reviewer tracking, and resume decisions.
 - Agent Governance Engine with global policies, local override controls, rule inheritance, policy merging, standards registry, markdown loading, and runtime validation.
 - Dynamic Governance Management UI and APIs for editing gravity rules, anti-gravity rules, personalities, prompts, coding standards, and QA policies with live persistence, version history, rollback, and reload events.
-- Real-time execution streaming with async event bus, execution tracker, timeline generator, structured logging, telemetry layer, and WebSocket-ready events.
+- Real-time execution streaming with async event bus, execution tracker, timeline generator, structured logging, telemetry layer, WebSocket-ready events, live workflow graph snapshots, and execution node tracking.
 - Observability and telemetry architecture with metrics, tracing, execution telemetry, workflow analytics, agent analytics, error tracking, Prometheus text output, OpenTelemetry-ready spans, Datadog-ready JSON, and Grafana dashboard models.
-- FastAPI backend with modular routers for workspace chat, workflows, executions, uploads, agent status, approvals, observability, health checks, QA reports, generated docs, PR summaries, and WebSocket execution events.
-- Next.js dashboard with AI workspace chat, workflow visualization, agent status monitoring, approval gates, observability, execution timelines, live logs, QA reports, screenshot evidence, generated documentation, Mermaid diagrams, and PR visualization.
-- Production deployment architecture with Dockerfiles, Docker Compose, environment templates, production config, CI workflow, and Kubernetes-ready manifests.
+- FastAPI backend with modular routers for workspace chat, workflows, executions, workflow telemetry, uploads, agent status, approvals, observability, health checks, QA reports, generated docs, PR summaries, and WebSocket execution events.
+- Next.js dashboard with AI workspace chat, live workflow visualization, execution graph nodes, workflow dependency rendering, agent status monitoring, approval gates, observability, execution timelines, live logs, QA reports, screenshot evidence, generated documentation, Mermaid diagrams, and PR visualization.
+- Full Docker Compose platform with frontend, FastAPI backend, LangGraph runtime, PostgreSQL, Redis, Qdrant, Playwright sandbox, Selenium sandbox, MinIO, and Nginx reverse proxy.
 
 ## Default Workflow
 
@@ -266,7 +327,58 @@ The orchestration layer also supports:
 - minimal shared graph state
 - execution metadata for UI/API consumers
 
-## Backend API
+## Running the Platform
+
+### Docker Compose
+
+Start everything:
+
+```powershell
+copy deployment\env\.env.compose.example .env.compose
+docker compose --env-file .env.compose up --build
+```
+
+Run in the background:
+
+```powershell
+docker compose --env-file .env.compose up --build -d
+```
+
+View logs:
+
+```powershell
+docker compose --env-file .env.compose logs -f backend
+docker compose --env-file .env.compose logs -f frontend
+docker compose --env-file .env.compose logs -f playwright-sandbox
+```
+
+Stop services:
+
+```powershell
+docker compose --env-file .env.compose down
+```
+
+Rebuild one service:
+
+```powershell
+docker compose --env-file .env.compose up --build backend
+```
+
+Useful local URLs:
+
+```text
+http://127.0.0.1:8080/dashboard
+http://127.0.0.1:8080/api/health
+http://127.0.0.1:8000/health
+http://127.0.0.1:3000/dashboard
+http://127.0.0.1:6333/dashboard
+http://127.0.0.1:9001
+http://127.0.0.1:4444
+```
+
+### Local Backend
+
+Use this path when developing Python services outside Docker.
 
 The FastAPI application is located in `app/`.
 
@@ -281,6 +393,7 @@ Core API areas:
 - workflow upload and triggering
 - workspace chat conversations, uploads, references, messages, events, and workflow triggering
 - execution status and logs
+- workflow telemetry, execution graph snapshots, Mermaid workflow graph, and live visualization data
 - agent status
 - approval gate creation, decisions, pause state, and resume state
 - governance configuration editing, version history, rollback, and reload history
@@ -289,9 +402,9 @@ Core API areas:
 - generated documentation retrieval
 - PR summary retrieval
 - health checks
-- WebSocket-ready execution streams
+- WebSocket-ready execution and workflow telemetry streams
 
-## Frontend Dashboard
+### Local Frontend
 
 The dashboard is located in `frontend/` and uses:
 
@@ -305,7 +418,8 @@ The dashboard is located in `frontend/` and uses:
 - approval gate visualization
 - governance markdown editor and version history
 - observability analytics panels
-- WebSocket-ready execution streaming
+- live workflow visualization
+- WebSocket-ready execution and workflow telemetry streaming
 
 Run the dashboard:
 
@@ -330,7 +444,7 @@ NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8000
 
 Without those variables, the dashboard uses typed mock data so the UI remains executable during backend integration.
 
-## Deployment
+## Deployment Assets
 
 Production deployment assets live in `deployment/`.
 
@@ -343,14 +457,7 @@ Production deployment assets live in `deployment/`.
 - full local platform guide: `deployment/docs/docker-compose-platform.md`
 - CI workflow: `.github/workflows/ci.yml`
 
-Full local platform run:
-
-```powershell
-copy deployment\env\.env.compose.example .env.compose
-docker compose --env-file .env.compose up --build
-```
-
-The root Compose stack includes frontend, FastAPI backend, LangGraph runtime, PostgreSQL, Redis, Qdrant, Playwright sandbox, Selenium sandbox, MinIO, and Nginx.
+The root `docker-compose.yml` is the canonical local platform stack. It includes frontend, FastAPI backend, LangGraph runtime, PostgreSQL, Redis, Qdrant, Playwright sandbox, Selenium sandbox, MinIO, and Nginx.
 
 ## Agent Rule Loading
 
@@ -374,7 +481,9 @@ QA runtime reads:
 
 ## Setup
 
-Install backend dependencies:
+For Docker Compose, Docker Desktop or a compatible Docker engine is enough.
+
+For local development outside Docker, install backend dependencies:
 
 ```powershell
 python -m pip install -r requirements.txt
