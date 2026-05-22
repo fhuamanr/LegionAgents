@@ -1,0 +1,39 @@
+# Git and editor state
+.git
+.github
+.idea
+.vscode
+
+# Python caches and virtualenvs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+
+# Node build artifacts
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+npm-debug.log*
+
+# Runtime outputs and secrets
+.env
+.env.*
+!.env.example
+outputs/
+logs/
+screenshots/
+videos/
+traces/
+playwright-report/
+test-results/
+

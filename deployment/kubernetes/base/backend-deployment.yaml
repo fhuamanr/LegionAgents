@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-agent-backend
+  labels:
+    app: multi-agent-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: multi-agent-backend
+  template:
+    metadata:
+      labels:
+        app: multi-agent-backend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: backend
+          image: multi-agent-delivery-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: multi-agent-backend-config
+            - secretRef:
+                name: multi-agent-backend-secrets
+          volumeMounts:
+            - name: outputs
+              mountPath: /app/outputs
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: outputs
+          persistentVolumeClaim:
+            claimName: multi-agent-outputs
+

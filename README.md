@@ -257,6 +257,23 @@ NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8000
 
 Without those variables, the dashboard uses typed mock data so the UI remains executable during backend integration.
 
+## Deployment
+
+Production deployment assets live in `deployment/`.
+
+- Dockerfiles: `deployment/docker/`
+- Compose files: `deployment/compose/`
+- environment templates: `deployment/env/`
+- production configuration: `deployment/config/`
+- future Kubernetes manifests: `deployment/kubernetes/`
+- deployment guide: `deployment/docs/production-deployment.md`
+
+Local Docker run:
+
+```powershell
+docker compose -f deployment/compose/docker-compose.local.yml up --build backend frontend
+```
+
 ## Agent Rule Loading
 
 Developer runtime reads:

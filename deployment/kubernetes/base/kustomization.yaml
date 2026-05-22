@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - backend-deployment.yaml
+  - backend-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - qa-sandbox-job.yaml
+  - storage.yaml
+
+configMapGenerator:
+  - name: multi-agent-backend-config
+    literals:
+      - APP_ENV=production
+      - STORAGE_ROOT=/app/outputs
+      - OBSERVABILITY_ENABLED=true
+  - name: multi-agent-frontend-config
+    literals:
+      - NEXT_PUBLIC_API_BASE_URL=https://api.example.com
+      - NEXT_PUBLIC_WS_BASE_URL=wss://api.example.com
+  - name: multi-agent-qa-sandbox-config
+    literals:
+      - APP_ENV=production
+      - QA_SANDBOX_ARTIFACT_ROOT=/app/outputs/qa_sandbox
+

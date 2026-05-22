@@ -1,0 +1,36 @@
+app:
+  name: multi-agent-delivery-backend
+  environment: production
+  host: 0.0.0.0
+  port: 8000
+  workers: 2
+
+security:
+  require_https: true
+  trust_proxy_headers: true
+  secrets_source: environment
+  allow_cors_origins:
+    - https://dashboard.example.com
+
+storage:
+  mode: local-volume
+  root: /app/outputs
+  future_adapters:
+    - s3
+    - azure_blob
+    - gcs
+
+memory:
+  active_adapter: in_memory
+  future_adapters:
+    redis: ${REDIS_URL}
+    postgres: ${POSTGRES_DSN}
+    vector_database: pending
+
+observability:
+  structured_logging: true
+  prometheus_metrics_path: /observability/metrics/prometheus
+  opentelemetry_ready: true
+  datadog_ready: true
+  grafana_ready: true
+

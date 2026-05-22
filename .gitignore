@@ -28,6 +28,7 @@ dist/
 .env
 .env.*
 !.env.example
+!deployment/env/*.example
 *.pem
 *.key
 *.p12

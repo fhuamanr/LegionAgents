@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-agent-frontend
+  labels:
+    app: multi-agent-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: multi-agent-frontend
+  template:
+    metadata:
+      labels:
+        app: multi-agent-frontend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: frontend
+          image: multi-agent-delivery-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: multi-agent-frontend-config
+          readinessProbe:
+            httpGet:
+              path: /dashboard
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+

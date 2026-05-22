@@ -1,0 +1,21 @@
+app:
+  name: multi-agent-delivery-qa-sandbox
+  environment: production
+
+sandbox:
+  isolation_mode: docker
+  artifact_root: /app/outputs/qa_sandbox
+  browser_profile_strategy: per_execution
+  network_enabled: controlled
+  future_kubernetes:
+    namespace: qa-sandbox
+    job_per_execution: true
+    artifact_volume: persistent_volume_claim
+
+artifacts:
+  screenshots: true
+  videos: true
+  traces: true
+  logs: true
+  retention_days: 14
+

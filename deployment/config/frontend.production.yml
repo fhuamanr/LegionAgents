@@ -1,0 +1,14 @@
+app:
+  name: multi-agent-delivery-dashboard
+  environment: production
+  port: 3000
+
+runtime:
+  api_base_url: ${PUBLIC_API_BASE_URL}
+  websocket_base_url: ${PUBLIC_WS_BASE_URL}
+  next_telemetry_disabled: true
+
+security:
+  serve_behind_tls_proxy: true
+  content_security_policy: future
+
