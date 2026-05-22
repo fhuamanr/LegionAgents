@@ -113,6 +113,7 @@ function normalizeExecutionEvent(payload: Record<string, unknown>): ExecutionEve
     message: String(payload.message ?? ""),
     timestamp: String(payload.timestamp ?? new Date().toISOString()),
     severity: type === "agent_failed" || type === "QA_failed" ? "high" : type === "retry_started" ? "medium" : "info",
+    payload: asRawPayload(payload.payload),
   };
 }
 
@@ -144,6 +145,23 @@ function asMetadata(value: unknown): Record<string, string | number | boolean> {
   );
 }
 
+function asRawPayload(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
 function isKnownEventType(type: string): type is ExecutionEvent["type"] {
-  return ["agent_started", "agent_completed", "agent_failed", "retry_started", "QA_failed", "PR_generated", "docs_generated"].includes(type);
+  return [
+    "agent_started",
+    "agent_completed",
+    "agent_failed",
+    "retry_started",
+    "QA_failed",
+    "PR_generated",
+    "docs_generated",
+    "log_emitted",
+    "progress_updated",
+    "token_streamed",
+    "output_generated",
+    "telemetry_recorded",
+  ].includes(type);
 }

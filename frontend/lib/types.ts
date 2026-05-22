@@ -42,11 +42,17 @@ export interface ExecutionEvent {
     | "retry_started"
     | "QA_failed"
     | "PR_generated"
-    | "docs_generated";
+    | "docs_generated"
+    | "log_emitted"
+    | "progress_updated"
+    | "token_streamed"
+    | "output_generated"
+    | "telemetry_recorded";
   readonly agent: AgentKey;
   readonly message: string;
   readonly timestamp: string;
   readonly severity: Severity;
+  readonly payload: Record<string, unknown>;
 }
 
 export interface TimelineItem {

@@ -19,6 +19,14 @@ async def trigger_workflow(
     return await service.trigger_workflow(request)
 
 
+@router.post("/live", response_model=WorkflowResponse, status_code=202)
+async def trigger_live_workflow(
+    request: TriggerWorkflowRequest,
+    service: ExecutionService = Depends(get_execution_service),
+) -> WorkflowResponse:
+    return await service.trigger_workflow_live(request)
+
+
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
     workflow_id: UUID,

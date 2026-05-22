@@ -1,5 +1,6 @@
 """Execution application service."""
 
+import asyncio
 from datetime import datetime, timezone
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -25,8 +26,10 @@ from core.streaming import (
     ExecutionEvent,
     ExecutionEventEmitter,
     ExecutionEventType,
+    ExecutionLogLevel,
     ExecutionTracker,
     InMemoryExecutionEventBus,
+    StructuredExecutionLogger,
     TimelineGenerator,
 )
 from core.graph import (
@@ -47,6 +50,7 @@ class ExecutionService:
         self.event_bus = event_bus or InMemoryExecutionEventBus()
         self._model_client = model_client
         self.emitter = ExecutionEventEmitter(self.event_bus)
+        self.logger = StructuredExecutionLogger(self.emitter)
         self.tracker = ExecutionTracker(self.event_bus)
         self.timeline = TimelineGenerator(self.event_bus)
         self.workflow_repository = InMemoryWorkflowExecutionRepository()
@@ -83,12 +87,22 @@ class ExecutionService:
         )
 
     async def trigger_workflow(self, request: TriggerWorkflowRequest) -> WorkflowResponse:
+        workflow = await self._initialize_workflow(request)
+        return await self._execute_workflow(workflow.workflow_id, request)
+
+    async def trigger_workflow_live(self, request: TriggerWorkflowRequest) -> WorkflowResponse:
+        """Start a workflow and return immediately for WebSocket subscribers."""
+
+        workflow = await self._initialize_workflow(request)
+        asyncio.create_task(self._execute_workflow(workflow.workflow_id, request))
+        return workflow
+
+    async def _initialize_workflow(self, request: TriggerWorkflowRequest) -> WorkflowResponse:
         now = datetime.now(timezone.utc)
         workflow_id = uuid4()
         metadata: dict[str, Any] = dict(request.metadata)
         if request.upload_id:
             metadata["upload_id"] = str(request.upload_id)
-        progress_hook = metadata.pop("progress_hook", None)
         workflow = WorkflowResponse(
             workflow_id=workflow_id,
             status=WorkflowStatus.RUNNING,
@@ -100,6 +114,13 @@ class ExecutionService:
         )
         self._workflows[workflow_id] = workflow
         await self.tracker.start_workflow(workflow_id=workflow_id, total_steps=6)
+        return workflow
+
+    async def _execute_workflow(self, workflow_id: UUID, request: TriggerWorkflowRequest) -> WorkflowResponse:
+        metadata: dict[str, Any] = dict(request.metadata)
+        if request.upload_id:
+            metadata["upload_id"] = str(request.upload_id)
+        progress_hook = metadata.pop("progress_hook", None)
         runtime = LangGraphExecutionRuntime(
             repository=self.workflow_repository,
             model_client=self._model_client,
@@ -108,12 +129,14 @@ class ExecutionService:
                 request.thread_id,
                 progress_hook if callable(progress_hook) else None,
             ),
+            token_callback=self._token_callback(),
         )
         result = await runtime.start(
             request.task,
             workflow_id=workflow_id,
             metadata=metadata,
         )
+        workflow = self._workflows[workflow_id]
         final_workflow = workflow.model_copy(
             update={
                 "status": self._workflow_status_from_run(result.status),
@@ -145,6 +168,7 @@ class ExecutionService:
             repository=self.workflow_repository,
             model_client=self._model_client,
             event_hook=self._runtime_event_hook(workflow_id, workflow.thread_id, progress_hook),
+            token_callback=self._token_callback(),
         )
         result = await runtime.recover(UUID(str(execution_id)))
         updated = workflow.model_copy(
@@ -164,6 +188,11 @@ class ExecutionService:
 
     async def get_workflow(self, workflow_id: UUID) -> WorkflowResponse:
         return self._workflows[workflow_id]
+
+    async def latest_workflow(self) -> WorkflowResponse | None:
+        if not self._workflows:
+            return None
+        return max(self._workflows.values(), key=lambda workflow: workflow.created_at)
 
     async def pause_workflow(self, workflow_id: UUID, metadata: dict[str, Any]) -> WorkflowResponse:
         """Mark a workflow as paused."""
@@ -268,6 +297,7 @@ class ExecutionService:
         async def emit_runtime_event(event_name: str, state: dict[str, Any]) -> None:
             agent_name = str(state.get("next_agent") or state.get("last_agent") or "")
             event_type = self._runtime_event_type(event_name, agent_name)
+            payload = self._runtime_event_payload(state, agent_name)
             event = await self.emitter.emit(
                 event_type,
                 workflow_id=workflow_id,
@@ -275,18 +305,115 @@ class ExecutionService:
                 thread_id=thread_id,
                 agent_name=agent_name or None,
                 message=self._runtime_event_message(event_name, agent_name),
-                payload={
-                    "attempts": state.get("attempts", {}),
-                    "status": state.get("status"),
-                },
+                payload=payload,
             )
             await self.tracker.apply_event(event)
+            await self.logger.log(
+                self._log_level_from_event(event_type),
+                event.message,
+                workflow_id=workflow_id,
+                execution_id=state.get("execution_id"),
+                agent_name=agent_name or None,
+                payload=payload,
+            )
+            if event_name == "agent_completed":
+                await self._emit_generated_output(workflow_id, thread_id, state, agent_name)
             if progress_hook is not None:
                 await progress_hook(event)
             if agent_name in self._agent_statuses:
                 self._agent_statuses[agent_name] = self._agent_status_from_event(event_type)
 
         return emit_runtime_event
+
+    def _token_callback(self):
+        async def publish(
+            workflow_id: UUID,
+            execution_id: UUID,
+            agent_name: str,
+            token: str,
+        ) -> None:
+            await self.emitter.emit(
+                ExecutionEventType.TOKEN_STREAMED,
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                agent_name=agent_name,
+                message=token,
+                payload={
+                    "token": token,
+                    "character_count": len(token),
+                    "estimated_tokens": max(1, len(token) // 4),
+                },
+            )
+
+        return publish
+
+    async def _emit_generated_output(
+        self,
+        workflow_id: UUID,
+        thread_id: str | None,
+        state: dict[str, Any],
+        agent_name: str,
+    ) -> None:
+        workflow_state = state.get("workflow_state")
+        snapshot = getattr(workflow_state, "agent_states", {}).get(agent_name) if workflow_state else None
+        artifacts = tuple(
+            artifact
+            for artifact in getattr(workflow_state, "artifacts", tuple())
+            if getattr(artifact, "producer_agent", None) == agent_name
+        ) if workflow_state else tuple()
+        payload: dict[str, Any] = {
+            "summary": getattr(snapshot, "summary", ""),
+            "status": getattr(getattr(snapshot, "status", None), "value", None),
+            "artifact_count": len(artifacts),
+            "artifacts": [artifact.model_dump(mode="json") for artifact in artifacts],
+            "metadata": getattr(snapshot, "metadata", {}) if snapshot else {},
+        }
+        await self.emitter.emit(
+            ExecutionEventType.OUTPUT_GENERATED,
+            workflow_id=workflow_id,
+            execution_id=state.get("execution_id"),
+            thread_id=thread_id,
+            agent_name=agent_name,
+            message=f"{self._agent_labels.get(agent_name, agent_name)} generated output.",
+            payload=payload,
+        )
+        if agent_name == "qa":
+            passed = bool(payload["metadata"].get("passed"))
+            await self.emitter.emit(
+                ExecutionEventType.TELEMETRY_RECORDED,
+                workflow_id=workflow_id,
+                execution_id=state.get("execution_id"),
+                thread_id=thread_id,
+                agent_name=agent_name,
+                message="QA result recorded.",
+                payload={
+                    "qa": {
+                        "passed": passed,
+                        "summary": payload["summary"],
+                        "artifact_count": len(artifacts),
+                    }
+                },
+            )
+
+    def _runtime_event_payload(self, state: dict[str, Any], agent_name: str) -> dict[str, Any]:
+        metadata = {
+            key: value
+            for key, value in dict(state.get("metadata", {})).items()
+            if not callable(value) and not str(key).startswith("_")
+        }
+        return {
+            "attempts": state.get("attempts", {}),
+            "status": state.get("status"),
+            "active_agent": agent_name or None,
+            "metadata": metadata,
+        }
+
+    def _log_level_from_event(self, event_type: ExecutionEventType) -> ExecutionLogLevel:
+        if event_type in {ExecutionEventType.AGENT_FAILED, ExecutionEventType.QA_FAILED}:
+            return ExecutionLogLevel.ERROR
+        if event_type == ExecutionEventType.RETRY_STARTED:
+            return ExecutionLogLevel.WARNING
+        return ExecutionLogLevel.INFO
 
     def _runtime_event_type(self, event_name: str, agent_name: str) -> ExecutionEventType:
         if event_name == "retry_started":

@@ -59,6 +59,18 @@ class LLMStructuredAgentRuntime(BaseAgent[BaseModel]):
         self._artifact_kind = artifact_kind
 
     async def invoke(self, context: Any) -> str:
+        token_callback = context.request.metadata.get("token_callback")
+        if callable(token_callback) and hasattr(self._model_client, "stream_complete"):
+            chunks: list[str] = []
+            async for chunk in self._model_client.stream_complete(context.prompt_messages):  # type: ignore[attr-defined]
+                chunks.append(chunk)
+                await token_callback(
+                    context.request.workflow_id,
+                    context.request.execution_id,
+                    self.config.name,
+                    chunk,
+                )
+            return "".join(chunks)
         return await self._model_client.complete(context.prompt_messages)
 
     async def build_artifacts(

@@ -21,18 +21,7 @@ export function useWorkflowTelemetry(
       return () => stream.close();
     }
 
-    const interval = window.setInterval(() => {
-      setSnapshot((current) => ({
-        ...current,
-        durationMs: current.durationMs + 5000,
-        metadata: {
-          ...current.metadata,
-          lastClientRefresh: new Date().toISOString(),
-        },
-      }));
-    }, 5000);
-
-    return () => window.clearInterval(interval);
+    return undefined;
   }, [workflowId]);
 
   return snapshot;

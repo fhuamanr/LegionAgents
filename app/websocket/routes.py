@@ -22,6 +22,8 @@ async def stream_execution(
 ) -> None:
     await manager.connect(workflow_id, websocket)
     try:
+        for event in await service.event_bus.history(workflow_id=workflow_id):
+            await websocket.send_json(event.model_dump(mode="json"))
         async for event in service.event_bus.subscribe(workflow_id=workflow_id):
             await websocket.send_json(event.model_dump(mode="json"))
     except WebSocketDisconnect:
@@ -36,6 +38,12 @@ async def stream_workflow_telemetry(
 ) -> None:
     await websocket.accept()
     try:
+        await websocket.send_json(
+            {
+                "event": None,
+                "telemetry": (await service.get_workflow_telemetry(workflow_id)).model_dump(mode="json"),
+            }
+        )
         async for event in service.event_bus.subscribe(workflow_id=workflow_id):
             telemetry = await service.get_workflow_telemetry(workflow_id)
             await websocket.send_json(

@@ -60,6 +60,7 @@ class LangGraphExecutionRuntime:
         max_agent_attempts: int = 2,
         max_qa_rejection_loops: int = 2,
         event_hook: WorkflowEventHook | None = None,
+        token_callback: Callable[[UUID, UUID, str, str], Awaitable[None]] | None = None,
         compiled_graph: CompiledStateGraph | None = None,
     ) -> None:
         self._agent_runtimes = agent_runtimes or build_default_agent_runtimes(
@@ -70,6 +71,7 @@ class LangGraphExecutionRuntime:
         self._max_agent_attempts = max_agent_attempts
         self._max_qa_rejection_loops = max_qa_rejection_loops
         self._event_hook = event_hook
+        self._token_callback = token_callback
         self._compiled_graph = compiled_graph
 
     @property
@@ -231,6 +233,7 @@ class LangGraphExecutionRuntime:
             upstream_artifacts=workflow_state.artifacts,
             metadata={
                 **state.get("metadata", {}),
+                **({"token_callback": self._token_callback} if self._token_callback is not None else {}),
                 "agent_attempt": attempts[agent_name],
                 "workflow_attempts": attempts,
             },
@@ -352,6 +355,11 @@ class LangGraphExecutionRuntime:
     ) -> RealWorkflowRuntimeState:
         execution_id = state["execution_id"]
         record = await self._repository.get(execution_id)
+        serializable_runtime_metadata = {
+            key: value
+            for key, value in dict(state.get("metadata", {})).items()
+            if not callable(value) and not str(key).startswith("_")
+        }
         if record.status == WorkflowRunStatus.CANCELLED and status != WorkflowRunStatus.CANCELLED:
             status = WorkflowRunStatus.CANCELLED
             next_agent = None
@@ -383,7 +391,7 @@ class LangGraphExecutionRuntime:
                         **updated.metadata,
                         "attempts": dict(state.get("attempts", {})),
                         "errors": list(state.get("errors", [])),
-                        "runtime_metadata": dict(state.get("metadata", {})),
+                        "runtime_metadata": serializable_runtime_metadata,
                     },
                 }
             )

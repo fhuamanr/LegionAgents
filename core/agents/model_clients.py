@@ -49,3 +49,20 @@ class OpenAIChatModelClient(AgentModelClient):
         if content is None:
             raise ValueError("OpenAI returned an empty message content.")
         return content
+
+    async def stream_complete(self, messages: tuple[PromptMessage, ...]):
+        """Stream chat-completion text deltas as they arrive from OpenAI."""
+
+        stream = await self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": message.role.value, "content": message.content}
+                for message in messages
+            ],
+            response_format=self._response_format,
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta

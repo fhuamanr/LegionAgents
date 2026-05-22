@@ -59,7 +59,7 @@ core/                    Clean architecture platform foundation
   repository*/           Git runtime and repository intelligence
   runtime/               Base agent runtime abstractions
   security/              JWT, RBAC, immutable audit
-  streaming/             Event bus, logs, timelines, telemetry
+  streaming/             Real event bus, token events, logs, timelines, telemetry
   workspaces/            Tenant-aware projects, repositories, permissions, config
 deployment/              Docker, Compose, env templates, Nginx, Kubernetes-ready assets
 frontend/                Next.js dashboard
@@ -72,7 +72,10 @@ tests/                   Backend foundation tests
 flowchart TB
   User["User / Delivery Lead"] --> UI["Next.js Dashboard"]
   UI --> API["FastAPI Backend"]
-  UI -. "WebSocket" .-> Stream["Streaming Bus"]
+  UI --> Snapshot["GET /dashboard/snapshot"]
+  UI --> LiveStart["POST /workflows/live"]
+  UI -. "Execution WebSocket" .-> EventWS["/ws/executions/{workflow_id}"]
+  UI -. "Telemetry WebSocket" .-> TelemetryWS["/ws/workflows/{workflow_id}/telemetry"]
 
   API --> Security["Security + Audit"]
   API --> Workspaces["Multi-Workspace Management"]
@@ -81,6 +84,7 @@ flowchart TB
   API --> Governance["Governance"]
   API --> Graph["LangGraph Orchestrator"]
   API --> Observability["Observability"]
+  API --> Dashboard["Live Dashboard Snapshot Service"]
 
   Workspaces --> Isolation["Storage / Memory / Governance Namespaces"]
   Security --> RBAC["JWT + RBAC"]
@@ -93,6 +97,7 @@ flowchart TB
   Runtime --> QA["QA"]
   Runtime --> Docs["Docs"]
   Runtime --> PR["PR"]
+  Runtime --> TokenStream["OpenAI token streaming callback"]
 
   Runtime --> Context["Context Engineering"]
   Runtime --> Memory["Semantic Memory"]
@@ -100,7 +105,13 @@ flowchart TB
   Runtime --> Sandbox["QA Sandbox"]
   Runtime --> Reviews["Autonomous PR Review"]
 
-  Stream --> Timeline["Timeline / Logs / Telemetry"]
+  Graph --> EventBus["In-memory ExecutionEventBus"]
+  TokenStream --> EventBus
+  EventBus --> EventWS
+  EventBus --> TelemetryWS
+  EventBus --> Dashboard
+  EventBus --> Timeline["Timeline / Logs / Tokens / Outputs / QA Telemetry"]
+  Snapshot --> Dashboard
   Sandbox --> Evidence["Screenshots / Videos / Logs"]
   Repo --> Git["Secure Git Operations"]
 ```
@@ -113,15 +124,24 @@ flowchart LR
   Ingestion --> BA["BA: stories + acceptance criteria"]
   BA --> Architect["Architect: decisions + constraints"]
   Architect --> Developer["Developer: implementation output"]
+  Developer --> TokenEvents["token_streamed events"]
   Developer --> Repo["Repository Runtime: branch / diff / commit / PR package"]
   Repo --> Review["Autonomous PR Review"]
   Review --> QA["QA: tests + evidence"]
   QA --> Sandbox["Playwright / Selenium Sandbox"]
   Sandbox --> QA
+  QA --> QATelemetry["telemetry_recorded QA result"]
   QA -->|approved| Docs["Docs"]
   QA -->|rejected| Developer
+  Developer --> Outputs["output_generated artifacts"]
+  QA --> Outputs
+  Docs --> Outputs
+  PR --> Outputs
   Docs --> Approval["Human Approval Gate"]
   Approval --> PR["PR Summary / Merge Readiness"]
+  Outputs --> LiveUI["Live dashboard panels"]
+  TokenEvents --> LiveUI
+  QATelemetry --> LiveUI
 ```
 
 ## Enterprise Boundaries
@@ -157,9 +177,12 @@ flowchart TB
   Browser["Browser"] --> Nginx["Nginx :8080"]
   Nginx --> Frontend["Next.js :3000"]
   Nginx --> Backend["FastAPI :8000"]
-  Frontend -. "WS / HTTP" .-> Backend
+  Frontend -. "HTTP snapshot + live workflow start" .-> Backend
+  Frontend -. "WS execution events + telemetry" .-> Backend
 
   Backend --> LangGraph["LangGraph Runtime"]
+  Backend --> EventBus["ExecutionEventBus"]
+  EventBus --> LiveLogs["Live logs / tokens / outputs / QA results"]
   Backend --> Postgres["PostgreSQL"]
   Backend --> Redis["Redis"]
   Backend --> Qdrant["Qdrant"]
@@ -175,28 +198,41 @@ flowchart TB
 ## Capabilities
 
 - **Orchestration:** LangGraph supervisor, typed graph state, conditional routing, retries, QA rejection loops, workflow metadata.
-- **Agent Runtime:** reusable base runtime, Developer runtime, QA runtime, prompt building, context assembly, output validation, retries, telemetry hooks.
+- **Agent Runtime:** reusable base runtime, Developer runtime, QA runtime, prompt building, context assembly, output validation, retries, telemetry hooks, and OpenAI token streaming callbacks.
 - **Context and Memory:** markdown loading, context compression, token budgeting, isolated agent context, short/long-term memory, ADR/bug/execution history memory, semantic indexing, vector-ready retrieval, Qdrant-ready boundary.
 - **Workspace and Project Management:** tenant-aware workspaces, projects, repository bindings, workspace permissions, workspace-specific agent config, isolated storage/memory/governance namespaces.
 - **Repository Automation:** isolated Git workspaces, clone/branch/diff/commit/PR preparation, repository scanning, framework detection, dependency graphing, architecture summaries.
 - **Quality and Review:** autonomous QA output contracts, Playwright/Selenium sandbox boundaries, screenshot/log/evidence artifacts, autonomous PR review, structured comments, severity classification, merge readiness scoring.
 - **Governance and Prompts:** global and agent policies, inheritance, policy validation, editable governance UI, Prompt Engineering Studio with markdown editing, variables, preview, testing, versioning, comparison, rollback, token estimation.
 - **Security and Audit:** JWT auth boundary, RBAC roles/permissions, optional security middleware, route dependency helpers, immutable hash-chained audit events, audit APIs.
-- **Observability and Streaming:** execution event bus, live logs, timelines, workflow telemetry, metrics, traces, analytics, Prometheus/OpenTelemetry/Datadog/Grafana-ready outputs.
-- **Dashboard:** Next.js App Router UI for workspaces, chat, workflows, prompts, governance, approvals, observability, QA reports, docs, PR summaries, Mermaid diagrams.
+- **Observability and Streaming:** execution event bus, event history replay on WebSocket connect, live logs, token chunks, generated output events, QA telemetry, timelines, workflow telemetry, metrics, traces, analytics, Prometheus/OpenTelemetry/Datadog/Grafana-ready outputs.
+- **Dashboard:** Next.js App Router UI backed by `/dashboard/snapshot`, execution and telemetry WebSockets, live workflow graph, agent status, retries, tokens, generated outputs, QA results, approvals, observability, QA reports, docs, PR summaries, Mermaid diagrams, and an empty live-state shell when no backend is configured.
+
+## Real Streaming Components
+
+- `ExecutionEventBus`: in-memory async pub/sub and event history source for workflow-scoped execution events.
+- `ExecutionEventEmitter` and `StructuredExecutionLogger`: emit agent lifecycle, retry, progress, log, token, output, and QA telemetry events.
+- `LangGraphExecutionRuntime`: runs the real BA -> Architect -> Developer -> QA -> Docs -> PR graph and passes token callbacks into agent requests.
+- `OpenAIChatModelClient.stream_complete`: streams model deltas into `token_streamed` events when the real OpenAI client is active.
+- `/workflows/live`: returns a workflow id immediately and executes the real workflow in the background so clients can subscribe before completion.
+- `/ws/executions/{workflow_id}`: replays real event history, then streams new execution events live.
+- `/ws/workflows/{workflow_id}/telemetry`: streams live workflow graph snapshots after every workflow event.
+- `/dashboard/snapshot`: builds the dashboard state from the latest real workflow, event history, generated artifacts, QA telemetry, logs, retries, and token counters.
+- `useExecutionStream` and `useWorkflowTelemetry`: consume websocket data only; they no longer synthesize replayed or timer-driven execution movement.
 
 ## API Areas
 
 - `/auth/*` and `/audit/*`: JWT, access checks, audit events
 - `/workspaces/*`: tenants, workspaces, projects, repository bindings, isolation summary
 - `/workspace/chat/*`: chat conversations, uploads, references, workflow triggering
-- `/workflows/*` and `/executions/*`: workflow lifecycle, status, logs, telemetry
+- `/workflows/*` and `/executions/*`: workflow lifecycle, immediate live workflow start, status, logs, telemetry
 - `/approvals/*`: gates, decisions, pauses, resumes
 - `/governance/configs/*`: editable governance, versions, rollback
 - `/prompt-studio/prompts/*`: prompt CRUD, preview, testing, versions, compare, rollback
 - `/observability/*`: metrics, traces, analytics, exporters
 - `/reports/*`, `/docs/*`, `/pr/*`: QA reports, generated docs, PR summaries
-- `/ws/*`: execution, workflow telemetry, chat streams
+- `/dashboard/snapshot`: latest real workflow dashboard snapshot assembled from execution state and event history
+- `/ws/*`: execution, workflow telemetry, chat streams; execution sockets replay history and then stream live events
 
 ## Local Development
 
@@ -222,7 +258,7 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8000
 ```
 
-Without those variables, the dashboard uses typed mock data.
+Without those variables, execution views render an empty live-state shell. The old dummy execution visualization and mock event replay have been removed.
 
 ## Verification
 
@@ -240,7 +276,7 @@ npm.cmd run typecheck
 npm.cmd run build
 ```
 
-Latest verified backend suite: `89 passed`.
+Latest targeted streaming/API verification: `15 passed` for `tests\test_execution_streaming.py`, `tests\test_fastapi_backend.py`, and `tests\test_chat_workflow_execution.py`.
 
 ## Deployment Assets
 

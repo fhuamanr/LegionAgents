@@ -22,6 +22,9 @@ class ExecutionEventType(StrEnum):
     DOCS_GENERATED = "docs_generated"
     LOG_EMITTED = "log_emitted"
     PROGRESS_UPDATED = "progress_updated"
+    TOKEN_STREAMED = "token_streamed"
+    OUTPUT_GENERATED = "output_generated"
+    TELEMETRY_RECORDED = "telemetry_recorded"
 
 
 class ExecutionLogLevel(StrEnum):

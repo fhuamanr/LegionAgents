@@ -41,6 +41,7 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 - Added QA Execution Sandbox architecture with isolated Playwright/Selenium sessions, screenshots, videos, logs, evidence, artifact storage, retry safety, and Docker/Kubernetes-ready configuration.
 - Added Human Approval Workflow with approval gates, manual reviews, retry approvals, PR approvals, QA override approvals, workflow pauses, reviewer tracking, metadata, and resume decisions.
 - Added real-time execution streaming with async event bus, structured events, progress tracking, timelines, structured logs, telemetry fan-out, WebSocket-ready streams, and live workflow graph snapshots.
+- Added real streaming execution visualization components: `/workflows/live` for immediate workflow id handoff, `/dashboard/snapshot` for the latest real dashboard state, `/ws/executions/{workflow_id}` with history replay plus live events, `/ws/workflows/{workflow_id}/telemetry` with live graph snapshots, OpenAI token chunk streaming, generated output events, QA telemetry events, retry/status tracking, and frontend panels for tokens, outputs, QA results, logs, running/completed/failed agents, and retries.
 - Added observability architecture with structured logging, metrics, tracing, workflow analytics, agent analytics, error tracking, token usage, prompt size tracking, Prometheus text output, OpenTelemetry-ready spans, Datadog-ready JSON, and Grafana-ready dashboard models.
 
 ### Prompt and Dashboard Experience
@@ -48,6 +49,7 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 - Added Prompt Engineering Studio with prompt editing, markdown support, variable injection, live testing, execution preview, token estimation, versioning, comparison, rollback, and APIs/UI.
 - Added AI Workspace Chat with persisted conversations, uploads, URL references, Git references, repository path references, chat events, WebSocket streaming, and workflow triggering.
 - Added Next.js dashboard with workspace management, chat, workflow visualization, live logs, execution timelines, agent status, approvals, observability, QA reports, screenshots, generated docs, PR summaries, Mermaid rendering, governance editor, and Prompt Studio.
+- Removed dummy execution visualization from the frontend: mock dashboard data, client-side replay timers, synthetic event refreshes, and fake execution motion were replaced by real API snapshots, WebSocket streams, and an empty live-state shell when no backend is configured.
 
 ### Deployment
 
@@ -57,6 +59,7 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 ### Changed
 
 - Refactored README into an operator-focused overview with optimized Mermaid diagrams, concise capability map, Docker-first startup commands, and current API/UI surfaces.
+- Updated README, frontend README, and Mermaid diagrams to document the real live streaming execution path, dashboard snapshot service, token stream, generated outputs, QA telemetry, event history replay, and live workflow start endpoint.
 - Stabilized Developer Agent repository prompt context as the platform grew by increasing repository scan coverage and surfacing key developer runtime files separately.
 - `.gitignore` keeps real secrets ignored while allowing safe deployment environment templates.
 
