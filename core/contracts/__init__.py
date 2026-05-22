@@ -85,6 +85,14 @@ from core.contracts.memory import (
     VectorMemoryRecord,
     VectorSearchResult,
 )
+from core.contracts.memory_intelligence import (
+    SemanticIndexingSummary,
+    SemanticIndexRequest,
+    SemanticMemoryDocument,
+    SemanticMemoryKind,
+    SemanticRetrievalQuery,
+    SemanticRetrievalResult,
+)
 from core.contracts.outputs import (
     AcceptanceCriterion,
     AgentStructuredOutput,
@@ -269,6 +277,12 @@ __all__ = [
     "MemoryQuery",
     "MemoryRecordType",
     "MemoryScope",
+    "SemanticIndexingSummary",
+    "SemanticIndexRequest",
+    "SemanticMemoryDocument",
+    "SemanticMemoryKind",
+    "SemanticRetrievalQuery",
+    "SemanticRetrievalResult",
     "MetricKind",
     "MetricPoint",
     "ModuleDependency",
