@@ -137,6 +137,16 @@ from core.contracts.observability import (
     WorkflowAnalytics,
 )
 from core.contracts.prompts import PromptBuildRequest, PromptMessage, PromptRole
+from core.contracts.pr_review import (
+    MergeReadiness,
+    PRReviewCategory,
+    PRReviewComment,
+    PRReviewReport,
+    PRReviewRequest,
+    PRReviewScore,
+    PRReviewSeverity,
+    PRValidationResult,
+)
 from core.contracts.qa_sandbox import (
     SandboxArtifact,
     SandboxArtifactKind,
@@ -297,6 +307,14 @@ __all__ = [
     "PromptMessage",
     "PromptRole",
     "PromptTelemetry",
+    "PRReviewCategory",
+    "PRReviewComment",
+    "PRReviewReport",
+    "PRReviewRequest",
+    "PRReviewScore",
+    "PRReviewSeverity",
+    "PRValidationResult",
+    "MergeReadiness",
     "ParsedDocument",
     "PullRequestPreparation",
     "PullRequestOutput",
