@@ -119,3 +119,35 @@ def test_approval_gate_pauses_and_resumes_workflow_api() -> None:
 
     resumed_workflow = client.get(f"/workflows/{workflow_id}").json()
     assert resumed_workflow["status"] == "running"
+
+
+def test_observability_api_exposes_metrics_and_analytics() -> None:
+    client = TestClient(create_app())
+
+    workflow_response = client.post(
+        "/workflows",
+        json={"task": "Deliver observable workflow", "thread_id": "thread-observe"},
+    )
+    workflow_id = workflow_response.json()["workflow_id"]
+
+    snapshot_response = client.get("/observability/snapshot")
+    assert snapshot_response.status_code == 200
+    snapshot = snapshot_response.json()["snapshot"]
+    assert snapshot["metadata"]["prometheus_ready"] is True
+    assert snapshot["metadata"]["opentelemetry_ready"] is True
+
+    workflow_analytics_response = client.get(f"/observability/workflows/{workflow_id}")
+    assert workflow_analytics_response.status_code == 200
+    assert workflow_analytics_response.json()["workflow_id"] == workflow_id
+
+    agents_response = client.get("/observability/agents")
+    assert agents_response.status_code == 200
+    assert any(agent["agent_name"] == "ba" for agent in agents_response.json()["agents"])
+
+    prometheus_response = client.get("/observability/metrics/prometheus")
+    assert prometheus_response.status_code == 200
+    assert "execution_events_total" in prometheus_response.text
+
+    grafana_response = client.get("/observability/exporters/grafana")
+    assert grafana_response.status_code == 200
+    assert grafana_response.json()["title"] == "Multi-Agent Delivery Observability"

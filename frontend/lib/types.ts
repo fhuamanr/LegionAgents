@@ -131,6 +131,53 @@ export interface ApprovalGate {
   readonly decisionReason?: string;
 }
 
+export interface TokenUsageSummary {
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly totalTokens: number;
+}
+
+export interface PromptTelemetrySummary {
+  readonly messageCount: number;
+  readonly characterCount: number;
+  readonly estimatedTokens: number;
+}
+
+export interface AgentAnalyticsSummary {
+  readonly agentName: string;
+  readonly executionsStarted: number;
+  readonly executionsCompleted: number;
+  readonly failures: number;
+  readonly retries: number;
+  readonly qaRejections: number;
+  readonly averageExecutionTimeMs: number;
+  readonly tokenUsage: TokenUsageSummary;
+  readonly promptTelemetry: PromptTelemetrySummary;
+}
+
+export interface WorkflowAnalyticsSummary {
+  readonly workflowId: string;
+  readonly durationMs: number;
+  readonly agentCount: number;
+  readonly retries: number;
+  readonly failures: number;
+  readonly qaRejectionRate: number;
+  readonly tokenUsage: TokenUsageSummary;
+  readonly promptTelemetry: PromptTelemetrySummary;
+}
+
+export interface ObservabilitySummary {
+  readonly workflow: WorkflowAnalyticsSummary;
+  readonly agents: readonly AgentAnalyticsSummary[];
+  readonly metrics: readonly string[];
+  readonly exporters: {
+    readonly opentelemetryReady: boolean;
+    readonly datadogReady: boolean;
+    readonly prometheusReady: boolean;
+    readonly grafanaReady: boolean;
+  };
+}
+
 export interface DashboardSnapshot {
   readonly workflowId: string;
   readonly agents: readonly AgentSummary[];
@@ -142,5 +189,6 @@ export interface DashboardSnapshot {
   readonly docs: readonly DocumentationArtifact[];
   readonly pullRequest: PullRequestSummary;
   readonly approvals: readonly ApprovalGate[];
+  readonly observability: ObservabilitySummary;
   readonly mermaid: string;
 }

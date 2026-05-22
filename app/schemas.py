@@ -156,3 +156,16 @@ class WorkflowResumeResponse(ApiModel):
     route_signal: str
     reason: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ObservabilitySnapshotResponse(ApiModel):
+    snapshot: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowAnalyticsResponse(ApiModel):
+    workflow_id: UUID
+    analytics: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentAnalyticsResponse(ApiModel):
+    agents: tuple[dict[str, Any], ...] = Field(default_factory=tuple)

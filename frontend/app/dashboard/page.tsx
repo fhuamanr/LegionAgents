@@ -5,6 +5,7 @@ import { MetricStrip } from "@/features/dashboard/metric-strip";
 import { MermaidDiagram } from "@/features/diagrams/mermaid-diagram";
 import { ExecutionTimeline } from "@/features/executions/execution-timeline";
 import { LiveLogViewer } from "@/features/executions/live-log-viewer";
+import { ObservabilityPanel } from "@/features/observability/observability-panel";
 import { GeneratedDocsViewer } from "@/features/docs/generated-docs-viewer";
 import { PrSummaryPanel } from "@/features/pr/pr-summary-panel";
 import { QaReportViewer } from "@/features/qa/qa-report-viewer";
@@ -21,6 +22,7 @@ export default async function DashboardPage(): Promise<JSX.Element> {
         <WorkflowMap stages={snapshot.stages} />
         <AgentStatusGrid agents={snapshot.agents} />
         <ApprovalGatesPanel approvals={snapshot.approvals} />
+        <ObservabilityPanel observability={snapshot.observability} />
         <div className="grid gap-6 xl:grid-cols-[1fr_28rem]">
           <ExecutionTimeline items={snapshot.timeline} />
           <QaReportViewer report={snapshot.qaReport} />

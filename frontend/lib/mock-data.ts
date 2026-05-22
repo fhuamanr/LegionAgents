@@ -224,6 +224,57 @@ export const mockDashboardSnapshot: DashboardSnapshot = {
       decisionReason: "Summary and test evidence are complete.",
     },
   ],
+  observability: {
+    workflow: {
+      workflowId: "wf-enterprise-001",
+      durationMs: 286000,
+      agentCount: 6,
+      retries: 1,
+      failures: 0,
+      qaRejectionRate: 0.25,
+      tokenUsage: { promptTokens: 12400, completionTokens: 4300, totalTokens: 16700 },
+      promptTelemetry: { messageCount: 42, characterCount: 58800, estimatedTokens: 14700 },
+    },
+    agents: [
+      {
+        agentName: "developer",
+        executionsStarted: 2,
+        executionsCompleted: 1,
+        failures: 0,
+        retries: 1,
+        qaRejections: 0,
+        averageExecutionTimeMs: 124000,
+        tokenUsage: { promptTokens: 6200, completionTokens: 2400, totalTokens: 8600 },
+        promptTelemetry: { messageCount: 18, characterCount: 28400, estimatedTokens: 7100 },
+      },
+      {
+        agentName: "qa",
+        executionsStarted: 1,
+        executionsCompleted: 1,
+        failures: 0,
+        retries: 0,
+        qaRejections: 1,
+        averageExecutionTimeMs: 76000,
+        tokenUsage: { promptTokens: 3100, completionTokens: 900, totalTokens: 4000 },
+        promptTelemetry: { messageCount: 11, characterCount: 13200, estimatedTokens: 3300 },
+      },
+    ],
+    metrics: [
+      "agent_execution_duration_ms",
+      "agent_retries_total",
+      "agent_failures_total",
+      "qa_rejections_total",
+      "workflow_duration_ms",
+      "tokens_total",
+      "prompt_size_estimated_tokens",
+    ],
+    exporters: {
+      opentelemetryReady: true,
+      datadogReady: true,
+      prometheusReady: true,
+      grafanaReady: true,
+    },
+  },
   mermaid: `flowchart LR
   BA["BA"] --> Architect["Architect"]
   Architect --> Developer["Developer"]
