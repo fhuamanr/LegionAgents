@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { AgentStatusGrid } from "@/features/agents/agent-status-grid";
+import { ApprovalGatesPanel } from "@/features/approvals/approval-gates-panel";
 import { MetricStrip } from "@/features/dashboard/metric-strip";
 import { MermaidDiagram } from "@/features/diagrams/mermaid-diagram";
 import { ExecutionTimeline } from "@/features/executions/execution-timeline";
@@ -19,6 +20,7 @@ export default async function DashboardPage(): Promise<JSX.Element> {
         <MetricStrip snapshot={snapshot} />
         <WorkflowMap stages={snapshot.stages} />
         <AgentStatusGrid agents={snapshot.agents} />
+        <ApprovalGatesPanel approvals={snapshot.approvals} />
         <div className="grid gap-6 xl:grid-cols-[1fr_28rem]">
           <ExecutionTimeline items={snapshot.timeline} />
           <QaReportViewer report={snapshot.qaReport} />

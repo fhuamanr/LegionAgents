@@ -19,6 +19,7 @@ class WorkflowStatus(StrEnum):
 
     PENDING = "pending"
     RUNNING = "running"
+    PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -87,3 +88,71 @@ class StoredUpload(ApiModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     received_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+
+class ReviewerRequest(ApiModel):
+    reviewer_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    email: str | None = None
+    role: str | None = None
+
+
+class CreateApprovalRequest(ApiModel):
+    workflow_id: UUID
+    gate_type: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    requested_by: str = Field(min_length=1)
+    required_reviewers: tuple[ReviewerRequest, ...] = Field(default_factory=tuple)
+    agent_name: str | None = None
+    thread_id: str | None = None
+    pause_reason: str = "awaiting_approval"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalDecisionApiRequest(ApiModel):
+    decision: str = Field(min_length=1)
+    reviewer: ReviewerRequest
+    reason: str = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalResponse(ApiModel):
+    approval_id: UUID
+    workflow_id: UUID
+    gate_type: str
+    status: str
+    title: str
+    description: str
+    requested_by: str
+    required_reviewers: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+    agent_name: str | None = None
+    thread_id: str | None = None
+    pause_reason: str
+    created_at: datetime
+    updated_at: datetime
+    decided_at: datetime | None = None
+    decided_by: dict[str, Any] | None = None
+    decision_reason: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalListResponse(ApiModel):
+    approvals: tuple[ApprovalResponse, ...] = Field(default_factory=tuple)
+
+
+class WorkflowPauseResponse(ApiModel):
+    workflow_id: UUID
+    approval_id: UUID
+    reason: str
+    paused_at: datetime
+    resume_token: UUID
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowResumeResponse(ApiModel):
+    workflow_id: UUID
+    approval_id: UUID
+    can_resume: bool
+    route_signal: str
+    reason: str
+    metadata: dict[str, Any] = Field(default_factory=dict)

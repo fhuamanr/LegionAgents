@@ -65,3 +65,57 @@ def test_agent_statuses() -> None:
 
     assert response.status_code == 200
     assert set(response.json()["agents"]) >= {"ba", "architect", "developer", "qa", "docs", "pr"}
+
+
+def test_approval_gate_pauses_and_resumes_workflow_api() -> None:
+    client = TestClient(create_app())
+
+    workflow_response = client.post(
+        "/workflows",
+        json={"task": "Deliver approval gated feature", "thread_id": "thread-approval"},
+    )
+    workflow_id = workflow_response.json()["workflow_id"]
+
+    approval_response = client.post(
+        "/approvals",
+        json={
+            "workflow_id": workflow_id,
+            "gate_type": "qa_override",
+            "title": "Approve QA override",
+            "description": "Allow workflow to continue after QA rejection.",
+            "requested_by": "qa",
+            "required_reviewers": [
+                {"reviewer_id": "lead-1", "display_name": "Delivery Lead", "role": "lead"}
+            ],
+            "pause_reason": "qa_override_required",
+        },
+    )
+
+    assert approval_response.status_code == 201
+    approval = approval_response.json()
+    assert approval["status"] == "pending"
+
+    paused_workflow = client.get(f"/workflows/{workflow_id}").json()
+    assert paused_workflow["status"] == "paused"
+    assert paused_workflow["metadata"]["approval_id"] == approval["approval_id"]
+
+    pause_response = client.get(f"/approvals/workflows/{workflow_id}/pause")
+    assert pause_response.status_code == 200
+    assert pause_response.json()["reason"] == "qa_override_required"
+
+    decision_response = client.post(
+        f"/approvals/{approval['approval_id']}/decisions",
+        json={
+            "decision": "approve",
+            "reviewer": {"reviewer_id": "lead-1", "display_name": "Delivery Lead"},
+            "reason": "Override approved.",
+        },
+    )
+
+    assert decision_response.status_code == 200
+    decision = decision_response.json()
+    assert decision["can_resume"] is True
+    assert decision["route_signal"] == "qa_override_approved"
+
+    resumed_workflow = client.get(f"/workflows/{workflow_id}").json()
+    assert resumed_workflow["status"] == "running"

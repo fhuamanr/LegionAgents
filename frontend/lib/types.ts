@@ -11,6 +11,10 @@ export type WorkflowStageStatus =
 
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
+export type ApprovalGateType = "manual_review" | "retry_approval" | "pr_approval" | "qa_override" | "release_approval";
+
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "cancelled" | "expired";
+
 export interface AgentSummary {
   readonly key: AgentKey;
   readonly name: string;
@@ -106,6 +110,27 @@ export interface PullRequestSummary {
   readonly summary: string;
 }
 
+export interface ReviewerSummary {
+  readonly reviewerId: string;
+  readonly displayName: string;
+  readonly role?: string;
+}
+
+export interface ApprovalGate {
+  readonly approvalId: string;
+  readonly workflowId: string;
+  readonly gateType: ApprovalGateType;
+  readonly status: ApprovalStatus;
+  readonly title: string;
+  readonly description: string;
+  readonly requestedBy: string;
+  readonly requiredReviewers: readonly ReviewerSummary[];
+  readonly pauseReason: string;
+  readonly createdAt: string;
+  readonly decidedAt?: string;
+  readonly decisionReason?: string;
+}
+
 export interface DashboardSnapshot {
   readonly workflowId: string;
   readonly agents: readonly AgentSummary[];
@@ -116,5 +141,6 @@ export interface DashboardSnapshot {
   readonly qaReport: QaReport;
   readonly docs: readonly DocumentationArtifact[];
   readonly pullRequest: PullRequestSummary;
+  readonly approvals: readonly ApprovalGate[];
   readonly mermaid: string;
 }

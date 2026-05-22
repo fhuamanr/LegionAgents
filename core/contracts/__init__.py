@@ -1,6 +1,19 @@
 """Shared contracts for agents, schemas, outputs, states, and workflows."""
 
 from core.contracts.agents import AgentDefinition, AgentRole, AgentStatus
+from core.contracts.approvals import (
+    ApprovalDecision,
+    ApprovalDecisionRequest,
+    ApprovalGateType,
+    ApprovalQuery,
+    ApprovalRecord,
+    ApprovalRequest,
+    ApprovalStatus,
+    Reviewer,
+    WorkflowPause,
+    WorkflowPauseReason,
+    WorkflowResumeDecision,
+)
 from core.contracts.artifacts import Artifact, ArtifactKind
 from core.contracts.base import (
     ContractBaseModel,
@@ -132,6 +145,13 @@ __all__ = [
     "AgentStructuredOutput",
     "AgentTransition",
     "AcceptanceCriterion",
+    "ApprovalDecision",
+    "ApprovalDecisionRequest",
+    "ApprovalGateType",
+    "ApprovalQuery",
+    "ApprovalRecord",
+    "ApprovalRequest",
+    "ApprovalStatus",
     "ArchitectureDecision",
     "ArchitectOutput",
     "Artifact",
@@ -204,6 +224,7 @@ __all__ = [
     "RepositorySummary",
     "RepositoryWorkspace",
     "RefactoringSuggestion",
+    "Reviewer",
     "RiskItem",
     "ScreenshotEvidence",
     "SandboxArtifact",
@@ -231,5 +252,8 @@ __all__ = [
     "WorkflowDefinition",
     "WorkflowEdge",
     "WorkflowExecutionState",
+    "WorkflowPause",
+    "WorkflowPauseReason",
+    "WorkflowResumeDecision",
     "WorkflowState",
 ]

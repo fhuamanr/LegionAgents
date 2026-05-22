@@ -196,6 +196,34 @@ export const mockDashboardSnapshot: DashboardSnapshot = {
     riskLevel: "medium",
     summary: "Includes contracts, runtime, memory, graph orchestration, QA system, governance, streaming, and API shell.",
   },
+  approvals: [
+    {
+      approvalId: "approval-001",
+      workflowId: "wf-enterprise-001",
+      gateType: "qa_override",
+      status: "pending",
+      title: "Approve QA override",
+      description: "QA rejection can be overridden only by a delivery lead with risk acceptance.",
+      requestedBy: "qa",
+      requiredReviewers: [{ reviewerId: "lead-1", displayName: "Delivery Lead", role: "lead" }],
+      pauseReason: "qa_override_required",
+      createdAt: minutesAgo(2),
+    },
+    {
+      approvalId: "approval-002",
+      workflowId: "wf-enterprise-001",
+      gateType: "pr_approval",
+      status: "approved",
+      title: "PR draft approval",
+      description: "Manual review accepted the generated PR summary.",
+      requestedBy: "pr",
+      requiredReviewers: [{ reviewerId: "arch-1", displayName: "Principal Architect", role: "architect" }],
+      pauseReason: "pr_review_required",
+      createdAt: minutesAgo(20),
+      decidedAt: minutesAgo(14),
+      decisionReason: "Summary and test evidence are complete.",
+    },
+  ],
   mermaid: `flowchart LR
   BA["BA"] --> Architect["Architect"]
   Architect --> Developer["Developer"]

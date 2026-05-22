@@ -88,6 +88,34 @@ class ExecutionService:
     async def get_workflow(self, workflow_id: UUID) -> WorkflowResponse:
         return self._workflows[workflow_id]
 
+    async def pause_workflow(self, workflow_id: UUID, metadata: dict[str, Any]) -> WorkflowResponse:
+        """Mark a workflow as paused."""
+
+        workflow = self._workflows[workflow_id]
+        updated = workflow.model_copy(
+            update={
+                "status": WorkflowStatus.PAUSED,
+                "updated_at": datetime.now(timezone.utc),
+                "metadata": {**workflow.metadata, **metadata},
+            }
+        )
+        self._workflows[workflow_id] = updated
+        return updated
+
+    async def resume_workflow(self, workflow_id: UUID, metadata: dict[str, Any]) -> WorkflowResponse:
+        """Mark a workflow as running after approval."""
+
+        workflow = self._workflows[workflow_id]
+        updated = workflow.model_copy(
+            update={
+                "status": WorkflowStatus.RUNNING,
+                "updated_at": datetime.now(timezone.utc),
+                "metadata": {**workflow.metadata, **metadata},
+            }
+        )
+        self._workflows[workflow_id] = updated
+        return updated
+
     async def get_execution_status(self, workflow_id: UUID) -> ExecutionStatusResponse:
         workflow = self._workflows[workflow_id]
         progress = await self.tracker.get(workflow_id)
@@ -121,4 +149,3 @@ class ExecutionService:
                 "events": list(logs.events),
             },
         )
-
