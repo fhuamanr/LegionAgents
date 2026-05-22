@@ -25,6 +25,10 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 - Observability and Telemetry architecture with structured logging support, metrics, traces, execution telemetry, workflow analytics, agent analytics, error tracking, token usage, prompt size tracking, Prometheus text output, OpenTelemetry-ready span export, Datadog-ready JSON, and Grafana-ready dashboard models.
 - Production deployment architecture with backend, frontend, and QA sandbox Dockerfiles; local and production Compose files; environment templates; production configuration; future Kubernetes manifests; storage architecture; Redis/PostgreSQL extension points; and CI workflow.
 - Deployment documentation with Mermaid diagrams for container topology, request/streaming flow, storage architecture, and CI/CD readiness.
+- Full root Docker Compose platform with frontend, FastAPI backend, LangGraph runtime, PostgreSQL, Redis, Qdrant, Playwright sandbox, Selenium sandbox, MinIO object storage, Nginx reverse proxy, isolated networks, persistent volumes, hot reload, startup dependencies, and health checks.
+- Development Dockerfiles for hot-reload backend, frontend, and Playwright sandbox containers.
+- Nginx reverse proxy configuration for frontend, `/api/` backend traffic, health checks, and `/ws/` WebSocket upgrades.
+- Local full-stack environment template and Docker Compose platform guide.
 
 ### Changed
 
@@ -38,5 +42,5 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 - Frontend typecheck: passed.
 - Frontend production build: passed.
 - Docker Compose local and production configurations: validated.
+- Root full-platform Docker Compose configuration: validated.
 - Kubernetes staging and production Kustomize overlays: rendered successfully.
-

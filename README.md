@@ -333,13 +333,17 @@ Production deployment assets live in `deployment/`.
 - production configuration: `deployment/config/`
 - future Kubernetes manifests: `deployment/kubernetes/`
 - deployment guide: `deployment/docs/production-deployment.md`
+- full local platform guide: `deployment/docs/docker-compose-platform.md`
 - CI workflow: `.github/workflows/ci.yml`
 
-Local Docker run:
+Full local platform run:
 
 ```powershell
-docker compose -f deployment/compose/docker-compose.local.yml up --build backend frontend
+copy deployment\env\.env.compose.example .env.compose
+docker compose --env-file .env.compose up --build
 ```
+
+The root Compose stack includes frontend, FastAPI backend, LangGraph runtime, PostgreSQL, Redis, Qdrant, Playwright sandbox, Selenium sandbox, MinIO, and Nginx.
 
 ## Agent Rule Loading
 

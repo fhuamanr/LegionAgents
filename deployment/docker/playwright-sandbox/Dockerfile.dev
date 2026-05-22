@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1.7
+
+FROM mcr.microsoft.com/playwright/python:v1.49.1-noble AS development
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    APP_HOME=/app \
+    QA_SANDBOX_ARTIFACT_ROOT=/app/outputs/qa_sandbox/playwright
+
+WORKDIR ${APP_HOME}
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -r requirements.txt
+
+COPY core ./core
+COPY tests ./tests
+
+RUN mkdir -p ${QA_SANDBOX_ARTIFACT_ROOT}
+
+CMD ["python", "-c", "import time; import core.qa_sandbox; print('Playwright sandbox ready', flush=True); time.sleep(10**9)"]
+
