@@ -7,14 +7,20 @@ from core.contracts.repository import (
     CommitGenerationRequest,
     DiffAnalysis,
     PullRequestPreparation,
+    RepositoryFileModification,
+    RepositoryFileOperation,
+    RepositoryModificationRequest,
+    RepositoryModificationResult,
     RepositoryCloneRequest,
     RepositoryRuntimeResult,
     RepositoryWorkspace,
 )
 from core.repository.diff import DiffAnalyzer
+from core.repository.files import RepositoryFileModificationEngine
 from core.repository.git import GitService
 from core.repository.metadata import RepositorySummarizer
 from core.repository.workspace import IsolatedWorkspaceManager
+from core.contracts.outputs import DeveloperOutput
 
 
 class RepositoryRuntime:
@@ -26,11 +32,13 @@ class RepositoryRuntime:
         git: GitService | None = None,
         summarizer: RepositorySummarizer | None = None,
         diff_analyzer: DiffAnalyzer | None = None,
+        file_engine: RepositoryFileModificationEngine | None = None,
     ) -> None:
         self._workspace_manager = workspace_manager or IsolatedWorkspaceManager()
         self._git = git or GitService()
         self._summarizer = summarizer or RepositorySummarizer(self._git)
         self._diff_analyzer = diff_analyzer or DiffAnalyzer(self._git)
+        self._file_engine = file_engine or RepositoryFileModificationEngine()
 
     async def clone_repository(self, request: RepositoryCloneRequest) -> RepositoryRuntimeResult:
         """Clone a repository into an isolated workspace and summarize it."""
@@ -74,6 +82,63 @@ class RepositoryRuntime:
         """Analyze a workspace diff."""
 
         return await self._diff_analyzer.analyze(workspace, base_ref=base_ref, target_ref=target_ref)
+
+    async def apply_file_modifications(
+        self,
+        workspace: RepositoryWorkspace,
+        request: RepositoryModificationRequest,
+    ) -> RepositoryRuntimeResult:
+        """Apply concrete file modifications and analyze the resulting diff."""
+
+        modifications = await self._file_engine.apply(workspace, request)
+        diff = await self._diff_analyzer.analyze(workspace)
+        summary = await self._summarizer.summarize(workspace)
+        return RepositoryRuntimeResult(
+            workspace=workspace,
+            metadata=summary.metadata,
+            summary=summary,
+            diff=diff,
+            modifications=modifications,
+        )
+
+    async def apply_developer_output(
+        self,
+        workspace: RepositoryWorkspace,
+        output: DeveloperOutput,
+    ) -> RepositoryRuntimeResult:
+        """Apply developer-generated code and test content to real files."""
+
+        modifications: list[RepositoryFileModification] = []
+        for change in output.code_changes:
+            if change.content is None:
+                continue
+            operation = self._operation_from_change_type(change.change_type)
+            modifications.append(
+                RepositoryFileModification(
+                    path=change.path,
+                    operation=operation,
+                    content=change.content,
+                    metadata={"source": "developer.code_changes", "description": change.description},
+                )
+            )
+        for test in output.tests:
+            if test.content is None:
+                continue
+            modifications.append(
+                RepositoryFileModification(
+                    path=test.path,
+                    operation=RepositoryFileOperation.UPSERT,
+                    content=test.content,
+                    metadata={"source": "developer.tests", "description": test.description, "test_type": test.test_type},
+                )
+            )
+        return await self.apply_file_modifications(
+            workspace,
+            RepositoryModificationRequest(
+                modifications=tuple(modifications),
+                metadata={"source": "developer_output", "structured_output_id": str(output.id)},
+            ),
+        )
 
     async def generate_commit(
         self,
@@ -133,6 +198,16 @@ class RepositoryRuntime:
         languages = sorted({change.language for change in diff.files if change.language})
         scope = ", ".join(languages) if languages else "files"
         return f"{prefix}: {len(diff.files)} {scope} files"
+
+    def _operation_from_change_type(self, change_type: str) -> RepositoryFileOperation:
+        normalized = change_type.lower().strip()
+        if normalized in {"create", "add", "new"}:
+            return RepositoryFileOperation.CREATE
+        if normalized in {"update", "modify", "edit", "refactor"}:
+            return RepositoryFileOperation.UPSERT
+        if normalized in {"delete", "remove"}:
+            return RepositoryFileOperation.DELETE
+        return RepositoryFileOperation.UPSERT
 
     def _default_pr_description(self, diff: DiffAnalysis) -> str:
         flags = "\n".join(f"- {flag}" for flag in diff.risk_flags) or "- No risk flags detected."

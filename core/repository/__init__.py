@@ -1,6 +1,7 @@
 """Autonomous repository engine."""
 
 from core.repository.diff import DiffAnalyzer
+from core.repository.files import RepositoryFileModificationEngine
 from core.repository.git import GitService
 from core.repository.metadata import RepositorySummarizer
 from core.repository.providers import GitHubRepositoryProvider, GitLabRepositoryProvider, RepositoryProviderAdapter
@@ -16,6 +17,7 @@ __all__ = [
     "GitService",
     "IsolatedWorkspaceManager",
     "RepositoryProviderAdapter",
+    "RepositoryFileModificationEngine",
     "RepositoryRuntime",
     "RepositorySummarizer",
 ]

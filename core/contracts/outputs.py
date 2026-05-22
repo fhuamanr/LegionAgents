@@ -130,6 +130,7 @@ class TestGenerationProposal(ContractBaseModel):
     test_type: str = Field(min_length=1)
     description: str = Field(min_length=1)
     command: str | None = None
+    content: str | None = None
 
 
 class RefactoringSuggestion(ContractBaseModel):

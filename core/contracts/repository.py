@@ -39,6 +39,15 @@ class RepositoryChangeKind(StrEnum):
     UNKNOWN = "unknown"
 
 
+class RepositoryFileOperation(StrEnum):
+    """Supported file operations inside an isolated repository workspace."""
+
+    CREATE = "create"
+    UPDATE = "update"
+    UPSERT = "upsert"
+    DELETE = "delete"
+
+
 class RepositoryWorkspace(ContractBaseModel):
     """Isolated repository workspace."""
 
@@ -149,6 +158,37 @@ class PullRequestPreparation(ContractBaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class RepositoryFileModification(ContractBaseModel):
+    """A concrete file operation to apply inside a repository workspace."""
+
+    path: str = Field(min_length=1)
+    operation: RepositoryFileOperation = RepositoryFileOperation.UPSERT
+    content: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RepositoryModificationRequest(ContractBaseModel):
+    """Batch of concrete file changes to apply to a workspace."""
+
+    modifications: tuple[RepositoryFileModification, ...] = Field(default_factory=tuple)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RepositoryModificationResult(ContractBaseModel):
+    """Result of applying concrete file changes."""
+
+    applied: tuple[RepositoryFileModification, ...] = Field(default_factory=tuple)
+    skipped: tuple[RepositoryFileModification, ...] = Field(default_factory=tuple)
+    errors: tuple[str, ...] = Field(default_factory=tuple)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def succeeded(self) -> bool:
+        """Whether all requested file changes were applied without errors."""
+
+        return not self.errors
+
+
 class RepositoryRuntimeResult(ContractBaseModel):
     """Repository runtime operation result."""
 
@@ -158,4 +198,5 @@ class RepositoryRuntimeResult(ContractBaseModel):
     summary: RepositorySummary | None = None
     diff: DiffAnalysis | None = None
     pull_request: PullRequestPreparation | None = None
+    modifications: RepositoryModificationResult | None = None
     git_results: tuple[GitCommandResult, ...] = Field(default_factory=tuple)

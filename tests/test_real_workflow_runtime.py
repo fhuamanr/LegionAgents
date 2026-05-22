@@ -25,7 +25,14 @@ class WorkflowModelClient(AgentModelClient):
         if "Agent name: architect." in prompt:
             return '{"agent_name":"architect","summary":"Architecture output"}'
         if "Agent name: developer." in prompt:
-            return '{"agent_name":"developer","summary":"Developer output"}'
+            return (
+                '{"agent_name":"developer","summary":"Developer output",'
+                '"code_changes":[{"path":"src/app.py","change_type":"update","description":"Update app",'
+                '"content":"def hello() -> str:\\n    return \\"hello from developer\\"\\n"}],'
+                '"tests":[{"path":"tests/test_app.py","test_type":"unit","description":"Test app",'
+                '"content":"from src.app import hello\\n\\ndef test_hello() -> None:\\n    assert hello() == \\"hello from developer\\"\\n"}],'
+                '"commit_message":"Implement developer output"}'
+            )
         if "Agent name: qa." in prompt:
             self._qa_calls += 1
             if self._reject_qa_once and self._qa_calls == 1:
