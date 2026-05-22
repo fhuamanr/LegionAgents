@@ -31,6 +31,7 @@ class PydanticOutputValidator(OutputValidator[TOutput]):
             raise ValueError(self._format_validation_error(exc)) from exc
 
     def _parse_json(self, raw_output: str) -> dict[str, Any]:
+        raw_output = self._strip_json_fence(raw_output)
         try:
             payload = json.loads(raw_output)
         except json.JSONDecodeError as exc:
@@ -39,9 +40,17 @@ class PydanticOutputValidator(OutputValidator[TOutput]):
             raise ValueError("Output must be a JSON object.")
         return payload
 
+    def _strip_json_fence(self, raw_output: str) -> str:
+        text = raw_output.strip()
+        if not text.startswith("```"):
+            return text
+        lines = text.splitlines()
+        if len(lines) >= 3 and lines[0].strip().startswith("```") and lines[-1].strip() == "```":
+            return "\n".join(lines[1:-1]).strip()
+        return text
+
     def _format_validation_error(self, exc: ValidationError) -> str:
         return "; ".join(
             f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
             for error in exc.errors()
         )
-

@@ -27,7 +27,8 @@ class RuntimePromptBuilder(PromptBuilder):
             f"Agent name: {config.name}.",
             f"Agent role: {config.role}.",
             "Stay inside this agent boundary. Do not perform responsibilities owned by other agents.",
-            "Return structured output that satisfies the configured output schema.",
+            "Return only a valid JSON object. Do not wrap it in Markdown unless the model provider forces it.",
+            "The JSON object must satisfy the configured output schema.",
         ]
         system_sections.extend(config.system_instructions)
         system_sections.extend(config.additional_instructions)
@@ -36,6 +37,14 @@ class RuntimePromptBuilder(PromptBuilder):
             f"# Task\n\n{request.task.strip()}",
             f"# Output Schema\n\n{config.output_schema_name}",
         ]
+        schema = config.metadata.get("output_json_schema")
+        if schema:
+            user_sections.append(f"# Required JSON Schema\n\n```json\n{schema}\n```")
+
+        governance_text = context.agent_context.metadata.get("governance_text")
+        if governance_text:
+            user_sections.append(f"# Inherited Governance Policy\n\n{governance_text}")
+
         rendered_context = context.agent_context.render()
         if rendered_context:
             user_sections.append(f"# Isolated Markdown Rules And Context\n\n{rendered_context}")
@@ -57,4 +66,3 @@ class RuntimePromptBuilder(PromptBuilder):
             f"- {artifact.kind.value}: {artifact.name} from {artifact.producer_agent}"
             for artifact in request.upstream_artifacts
         )
-

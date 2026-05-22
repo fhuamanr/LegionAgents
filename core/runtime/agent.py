@@ -86,6 +86,7 @@ class BaseAgent(ABC, Generic[TOutput]):
                 "prompt_message_count": len(prompt_messages),
                 "context_document_count": agent_context.metadata.get("document_count", 0),
                 "structured_output": structured_output.model_dump(mode="json"),
+                **self.result_metadata(structured_output),
             },
         )
 
@@ -98,6 +99,11 @@ class BaseAgent(ABC, Generic[TOutput]):
 
         summary = getattr(output, "summary", None)
         return str(summary) if summary else self.config.name
+
+    def result_metadata(self, output: TOutput) -> dict[str, object]:
+        """Return agent-specific metadata for routing and telemetry."""
+
+        return {}
 
     async def build_artifacts(
         self,
@@ -126,4 +132,3 @@ class BaseAgent(ABC, Generic[TOutput]):
             status=AgentStatus.FAILED,
             errors=errors,
         )
-

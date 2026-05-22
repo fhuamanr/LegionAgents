@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 from uuid import UUID, uuid4
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from core.agents.runtime import AgentRuntime
+from core.agents.runtime import AgentModelClient, AgentRuntime
 from core.contracts.agents import AgentStatus
 from core.contracts.execution import AgentExecutionRequest, AgentExecutionResult
 from core.contracts.states import WorkflowExecutionState
@@ -53,13 +54,18 @@ class LangGraphExecutionRuntime:
     def __init__(
         self,
         agent_runtimes: dict[str, AgentRuntime] | None = None,
+        model_client: AgentModelClient | None = None,
+        project_root: Path | None = None,
         repository: WorkflowExecutionRepository | None = None,
         max_agent_attempts: int = 2,
         max_qa_rejection_loops: int = 2,
         event_hook: WorkflowEventHook | None = None,
         compiled_graph: CompiledStateGraph | None = None,
     ) -> None:
-        self._agent_runtimes = agent_runtimes or build_default_agent_runtimes()
+        self._agent_runtimes = agent_runtimes or build_default_agent_runtimes(
+            project_root=project_root,
+            model_client=model_client,
+        )
         self._repository = repository or InMemoryWorkflowExecutionRepository()
         self._max_agent_attempts = max_agent_attempts
         self._max_qa_rejection_loops = max_qa_rejection_loops

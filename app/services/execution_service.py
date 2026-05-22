@@ -19,6 +19,7 @@ from app.schemas import (
     WorkflowResponse,
     WorkflowStatus,
 )
+from core.agents.runtime import AgentModelClient
 from core.streaming import (
     ExecutionEventEmitter,
     ExecutionEventType,
@@ -36,8 +37,13 @@ from core.graph import (
 class ExecutionService:
     """In-memory application service for workflow and execution APIs."""
 
-    def __init__(self, event_bus: InMemoryExecutionEventBus | None = None) -> None:
+    def __init__(
+        self,
+        event_bus: InMemoryExecutionEventBus | None = None,
+        model_client: AgentModelClient | None = None,
+    ) -> None:
         self.event_bus = event_bus or InMemoryExecutionEventBus()
+        self._model_client = model_client
         self.emitter = ExecutionEventEmitter(self.event_bus)
         self.tracker = ExecutionTracker(self.event_bus)
         self.timeline = TimelineGenerator(self.event_bus)
@@ -93,6 +99,7 @@ class ExecutionService:
         await self.tracker.start_workflow(workflow_id=workflow_id, total_steps=6)
         runtime = LangGraphExecutionRuntime(
             repository=self.workflow_repository,
+            model_client=self._model_client,
             event_hook=self._runtime_event_hook(workflow_id, request.thread_id),
         )
         result = await runtime.start(

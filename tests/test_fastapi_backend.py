@@ -1,10 +1,16 @@
 from fastapi.testclient import TestClient
 
+from app.services.execution_service import ExecutionService
 from app.main import create_app
+from tests.test_real_workflow_runtime import WorkflowModelClient
+
+
+def _client() -> TestClient:
+    return TestClient(create_app(execution_service=ExecutionService(model_client=WorkflowModelClient())))
 
 
 def test_healthcheck() -> None:
-    client = TestClient(create_app())
+    client = _client()
 
     response = client.get("/health")
 
@@ -14,7 +20,7 @@ def test_healthcheck() -> None:
 
 
 def test_upload_trigger_status_logs_and_reports() -> None:
-    client = TestClient(create_app())
+    client = _client()
 
     upload_response = client.post(
         "/uploads/user-stories",
@@ -72,7 +78,7 @@ def test_upload_trigger_status_logs_and_reports() -> None:
 
 
 def test_agent_statuses() -> None:
-    client = TestClient(create_app())
+    client = _client()
 
     response = client.get("/agents/status")
 
@@ -81,7 +87,7 @@ def test_agent_statuses() -> None:
 
 
 def test_approval_gate_pauses_and_resumes_workflow_api() -> None:
-    client = TestClient(create_app())
+    client = _client()
 
     workflow_response = client.post(
         "/workflows",
@@ -135,7 +141,7 @@ def test_approval_gate_pauses_and_resumes_workflow_api() -> None:
 
 
 def test_observability_api_exposes_metrics_and_analytics() -> None:
-    client = TestClient(create_app())
+    client = _client()
 
     workflow_response = client.post(
         "/workflows",
@@ -167,7 +173,7 @@ def test_observability_api_exposes_metrics_and_analytics() -> None:
 
 
 def test_governance_management_api_supports_versions_and_rollback() -> None:
-    client = TestClient(create_app())
+    client = _client()
 
     first = client.post(
         "/governance/configs",
@@ -214,7 +220,7 @@ def test_governance_management_api_supports_versions_and_rollback() -> None:
 
 
 def test_workspace_chat_api_uploads_references_and_triggers_workflow() -> None:
-    client = TestClient(create_app())
+    client = _client()
 
     conversation_response = client.post(
         "/workspace/chat/conversations",
