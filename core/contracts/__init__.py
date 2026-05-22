@@ -23,6 +23,17 @@ from core.contracts.base import (
     TimeStampedSchema,
     TraceMetadata,
 )
+from core.contracts.chat import (
+    ChatAttachmentUpload,
+    ChatConversation,
+    ChatEvent,
+    ChatEventType,
+    ChatMessage,
+    ChatMessageRequest,
+    ChatRole,
+    WorkspaceAttachment,
+    WorkspaceAttachmentKind,
+)
 from core.contracts.context import (
     AgentContext,
     ContextDocument,
@@ -184,6 +195,13 @@ __all__ = [
     "BranchCreationRequest",
     "BugMemoryRecord",
     "BugSummary",
+    "ChatAttachmentUpload",
+    "ChatConversation",
+    "ChatEvent",
+    "ChatEventType",
+    "ChatMessage",
+    "ChatMessageRequest",
+    "ChatRole",
     "CheckpointMemoryRecord",
     "BARequirementsOutput",
     "ContractBaseModel",
@@ -298,4 +316,6 @@ __all__ = [
     "WorkflowResumeDecision",
     "WorkflowAnalytics",
     "WorkflowState",
+    "WorkspaceAttachment",
+    "WorkspaceAttachmentKind",
 ]

@@ -198,3 +198,52 @@ def test_governance_management_api_supports_versions_and_rollback() -> None:
     reloads = client.get("/governance/configs/reloads")
     assert reloads.status_code == 200
     assert len(reloads.json()["events"]) >= 3
+
+
+def test_workspace_chat_api_uploads_references_and_triggers_workflow() -> None:
+    client = TestClient(create_app())
+
+    conversation_response = client.post(
+        "/workspace/chat/conversations",
+        json={"title": "Chat delivery workspace", "created_by": "tester"},
+    )
+    assert conversation_response.status_code == 201
+    conversation_id = conversation_response.json()["conversation"]["id"]
+
+    attachment_response = client.post(
+        f"/workspace/chat/conversations/{conversation_id}/attachments",
+        json={
+            "kind": "markdown",
+            "name": "story.md",
+            "content": "# Story\nAs a user, I can trigger workflows from chat.",
+            "content_type": "text/markdown",
+        },
+    )
+    assert attachment_response.status_code == 201
+    attachment_id = attachment_response.json()["attachment"]["id"]
+
+    git_response = client.post(
+        f"/workspace/chat/conversations/{conversation_id}/attachments",
+        json={
+            "kind": "git_repository",
+            "name": "platform repo",
+            "uri": "https://gitlab.com/example/platform.git",
+        },
+    )
+    assert git_response.status_code == 201
+
+    message_response = client.post(
+        f"/workspace/chat/conversations/{conversation_id}/messages",
+        json={
+            "content": "Trigger implementation workflow.",
+            "attachment_ids": [attachment_id],
+            "trigger_workflow": True,
+        },
+    )
+    assert message_response.status_code == 201
+    assert message_response.json()["workflow"]["status"] == "running"
+
+    events_response = client.get(f"/workspace/chat/conversations/{conversation_id}/events")
+    assert events_response.status_code == 200
+    event_types = {event["type"] for event in events_response.json()["events"]}
+    assert {"attachment_uploaded", "workflow_triggered", "execution_progress"} <= event_types

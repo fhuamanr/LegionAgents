@@ -210,6 +210,43 @@ export interface GovernanceConfigVersion {
   readonly createdAt: string;
 }
 
+export type ChatRole = "user" | "assistant" | "system" | "workflow";
+
+export type WorkspaceAttachmentKind =
+  | "pdf"
+  | "docx"
+  | "markdown"
+  | "text"
+  | "url"
+  | "git_repository"
+  | "repository_path";
+
+export interface WorkspaceAttachmentSummary {
+  readonly id: string;
+  readonly kind: WorkspaceAttachmentKind;
+  readonly name: string;
+  readonly uri?: string;
+  readonly path?: string;
+  readonly sizeBytes: number;
+}
+
+export interface WorkspaceChatMessage {
+  readonly id: string;
+  readonly role: ChatRole;
+  readonly content: string;
+  readonly attachmentIds: readonly string[];
+  readonly workflowId?: string;
+  readonly createdAt: string;
+}
+
+export interface WorkspaceConversationSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly messages: readonly WorkspaceChatMessage[];
+  readonly attachments: readonly WorkspaceAttachmentSummary[];
+  readonly updatedAt: string;
+}
+
 export interface DashboardSnapshot {
   readonly workflowId: string;
   readonly agents: readonly AgentSummary[];
@@ -225,6 +262,9 @@ export interface DashboardSnapshot {
   readonly governance: {
     readonly documents: readonly GovernanceConfigDocument[];
     readonly versions: readonly GovernanceConfigVersion[];
+  };
+  readonly workspace: {
+    readonly conversations: readonly WorkspaceConversationSummary[];
   };
   readonly mermaid: string;
 }

@@ -33,6 +33,9 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 - Versioned governance persistence with local JSON storage, rollback support, reload event history, and database-ready repository abstraction.
 - FastAPI governance management APIs for listing, saving, retrieving, version history, rollback, and reload history.
 - Frontend governance dashboard page with markdown editor, preview, agent/global document selectors, version history, and rollback controls.
+- AI Workspace Chat system with persisted conversations, markdown/text/PDF/DOCX upload records, URL ingestion references, Git repository references, repository path references, chat messages, and workflow triggering.
+- Chat WebSocket streaming endpoint for conversation-scoped events and execution progress updates.
+- Workspace frontend page with chat transcript, markdown-friendly rendering, attachment/reference panel, multi-source upload actions, and workflow trigger controls.
 
 ### Changed
 
@@ -48,4 +51,5 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 - Docker Compose local and production configurations: validated.
 - Root full-platform Docker Compose configuration: validated.
 - Dynamic governance management backend tests and frontend build: validated.
+- Workspace chat backend tests and frontend build: validated.
 - Kubernetes staging and production Kustomize overlays: rendered successfully.

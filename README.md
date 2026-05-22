@@ -11,7 +11,7 @@ The platform is organized around specialized agents with isolated responsibiliti
 - `docs`
 - `pr`
 
-The implementation currently focuses on reusable platform infrastructure: contracts, user story ingestion, context engineering, shared memory, autonomous repository operations, runtime execution, LangGraph orchestration, QA sandboxing, human approvals, governance, observability, real-time execution streaming, FastAPI APIs, production deployment assets, and a frontend dashboard for monitoring workflows.
+The implementation currently focuses on reusable platform infrastructure: contracts, AI workspace chat, user story ingestion, context engineering, shared memory, autonomous repository operations, runtime execution, LangGraph orchestration, QA sandboxing, human approvals, governance, observability, real-time execution streaming, FastAPI APIs, production deployment assets, and a frontend dashboard for monitoring workflows.
 
 ## Architecture
 
@@ -28,6 +28,7 @@ core/
   agents/                Executable agent runtimes
     developer/           Developer Agent runtime
     qa/                  QA Agent runtime
+  chat/                  AI workspace chat, uploads, references, events, and conversations
   context/               Raw context loading and section classification
   context_engineering/   Smart context selection, compression, summaries, and budgeting
   contracts/             Pydantic schemas and output contracts
@@ -230,6 +231,7 @@ flowchart TB
 ## Current Capabilities
 
 - Typed Pydantic contracts for agents, artifacts, context, execution, memory, prompts, outputs, and workflow state.
+- AI Workspace Chat with persisted conversations, uploads, URL references, Git references, repository path references, WebSocket chat streaming, and workflow triggering from chat.
 - User Story Ingestion Engine for markdown, txt, docx, pdf, and future Jira/Notion adapters.
 - Context loading from markdown and Mermaid files.
 - Context engineering with dynamic selection, compression, token budgeting, repository summaries, architecture summaries, memory retrieval, and leakage prevention.
@@ -245,8 +247,8 @@ flowchart TB
 - Dynamic Governance Management UI and APIs for editing gravity rules, anti-gravity rules, personalities, prompts, coding standards, and QA policies with live persistence, version history, rollback, and reload events.
 - Real-time execution streaming with async event bus, execution tracker, timeline generator, structured logging, telemetry layer, and WebSocket-ready events.
 - Observability and telemetry architecture with metrics, tracing, execution telemetry, workflow analytics, agent analytics, error tracking, Prometheus text output, OpenTelemetry-ready spans, Datadog-ready JSON, and Grafana dashboard models.
-- FastAPI backend with modular routers for workflows, executions, uploads, agent status, approvals, observability, health checks, QA reports, generated docs, PR summaries, and WebSocket execution events.
-- Next.js dashboard with workflow visualization, agent status monitoring, approval gates, observability, execution timelines, live logs, QA reports, screenshot evidence, generated documentation, Mermaid diagrams, and PR visualization.
+- FastAPI backend with modular routers for workspace chat, workflows, executions, uploads, agent status, approvals, observability, health checks, QA reports, generated docs, PR summaries, and WebSocket execution events.
+- Next.js dashboard with AI workspace chat, workflow visualization, agent status monitoring, approval gates, observability, execution timelines, live logs, QA reports, screenshot evidence, generated documentation, Mermaid diagrams, and PR visualization.
 - Production deployment architecture with Dockerfiles, Docker Compose, environment templates, production config, CI workflow, and Kubernetes-ready manifests.
 
 ## Default Workflow
@@ -277,6 +279,7 @@ python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 Core API areas:
 
 - workflow upload and triggering
+- workspace chat conversations, uploads, references, messages, events, and workflow triggering
 - execution status and logs
 - agent status
 - approval gate creation, decisions, pause state, and resume state
@@ -298,6 +301,7 @@ The dashboard is located in `frontend/` and uses:
 - Shadcn-style UI primitives
 - Lucide icons
 - Mermaid rendering
+- AI workspace chat with uploads, repository references, and workflow trigger controls
 - approval gate visualization
 - governance markdown editor and version history
 - observability analytics panels
@@ -410,6 +414,7 @@ Current test coverage validates:
 - Developer Agent runtime
 - QA Agent runtime
 - user story ingestion
+- AI workspace chat persistence and workflow triggering
 - autonomous repository runtime
 - QA execution sandbox
 - human approval workflow

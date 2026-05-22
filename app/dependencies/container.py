@@ -6,6 +6,7 @@ from app.services.execution_service import ExecutionService
 from app.services.approval_service import ApprovalApplicationService
 from app.services.observability_service import ObservabilityApplicationService
 from app.services.governance_management_service import GovernanceManagementApplicationService
+from app.services.chat_service import WorkspaceChatApplicationService
 
 
 class AppContainer:
@@ -16,6 +17,7 @@ class AppContainer:
         self.approval_service = ApprovalApplicationService(self.execution_service)
         self.observability_service = ObservabilityApplicationService(self.execution_service)
         self.governance_management_service = GovernanceManagementApplicationService()
+        self.chat_service = WorkspaceChatApplicationService(self.execution_service)
 
 
 @lru_cache(maxsize=1)
@@ -37,3 +39,7 @@ def get_observability_service() -> ObservabilityApplicationService:
 
 def get_governance_management_service() -> GovernanceManagementApplicationService:
     return get_container().governance_management_service
+
+
+def get_chat_service() -> WorkspaceChatApplicationService:
+    return get_container().chat_service

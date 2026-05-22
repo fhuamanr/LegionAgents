@@ -204,3 +204,46 @@ class GovernanceVersionListResponse(ApiModel):
 
 class GovernanceReloadHistoryResponse(ApiModel):
     events: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class ChatConversationCreateRequest(ApiModel):
+    title: str = Field(min_length=1)
+    created_by: str = Field(default="workspace-user", min_length=1)
+
+
+class ChatAttachmentUploadRequest(ApiModel):
+    kind: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    content: str | None = None
+    uri: str | None = None
+    path: str | None = None
+    content_type: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatMessageCreateRequest(ApiModel):
+    content: str = Field(min_length=1)
+    attachment_ids: tuple[UUID, ...] = Field(default_factory=tuple)
+    trigger_workflow: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatConversationResponse(ApiModel):
+    conversation: dict[str, Any]
+
+
+class ChatConversationListResponse(ApiModel):
+    conversations: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class ChatAttachmentResponse(ApiModel):
+    attachment: dict[str, Any]
+
+
+class ChatMessageResponse(ApiModel):
+    message: dict[str, Any]
+    workflow: dict[str, Any] | None = None
+
+
+class ChatEventListResponse(ApiModel):
+    events: tuple[dict[str, Any], ...] = Field(default_factory=tuple)

@@ -340,6 +340,45 @@ export const mockDashboardSnapshot: DashboardSnapshot = {
       },
     ],
   },
+  workspace: {
+    conversations: [
+      {
+        id: "chat-001",
+        title: "Implement approval-gated QA workflow",
+        updatedAt: minutesAgo(1),
+        attachments: [
+          { id: "att-001", kind: "markdown", name: "story.md", sizeBytes: 842 },
+          { id: "att-002", kind: "git_repository", name: "platform repository", uri: "https://gitlab.com/example/platform.git", sizeBytes: 42 },
+          { id: "att-003", kind: "url", name: "design notes", uri: "https://example.com/design", sizeBytes: 26 },
+        ],
+        messages: [
+          {
+            id: "msg-001",
+            role: "user",
+            content: "Use the attached story and repository reference to trigger the delivery workflow.",
+            attachmentIds: ["att-001", "att-002", "att-003"],
+            createdAt: minutesAgo(8),
+          },
+          {
+            id: "msg-002",
+            role: "assistant",
+            content: "**Workflow triggered.**\n\nBA is preparing the story package and I will stream progress here.",
+            attachmentIds: [],
+            workflowId: "wf-enterprise-001",
+            createdAt: minutesAgo(7),
+          },
+          {
+            id: "msg-003",
+            role: "workflow",
+            content: "Developer is running with repository context. QA sandbox is queued.",
+            attachmentIds: [],
+            workflowId: "wf-enterprise-001",
+            createdAt: minutesAgo(2),
+          },
+        ],
+      },
+    ],
+  },
   mermaid: `flowchart LR
   BA["BA"] --> Architect["Architect"]
   Architect --> Developer["Developer"]
