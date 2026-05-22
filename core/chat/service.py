@@ -102,7 +102,11 @@ class WorkspaceChatService:
             content=request.content,
             attachment_ids=request.attachment_ids,
             workflow_id=workflow_id,
-            metadata={**request.metadata, "trigger_workflow": request.trigger_workflow},
+            metadata={
+                **request.metadata,
+                "trigger_workflow": request.trigger_workflow,
+                "resume_workflow": request.resume_workflow,
+            },
         )
         await self.repository.add_message(conversation_id, message)
         await self.event_bus.publish(

@@ -15,8 +15,14 @@ from app.schemas import (
     TriggerWorkflowRequest,
 )
 from app.services.execution_service import ExecutionService
-from core.chat import WorkspaceChatService
-from core.contracts.chat import ChatAttachmentUpload, ChatMessageRequest, WorkspaceAttachmentKind
+from core.chat import ChatWorkflowIntentParser, WorkspaceChatService
+from core.contracts.chat import (
+    ChatAttachmentUpload,
+    ChatMessageRequest,
+    WorkspaceAttachment,
+    WorkspaceAttachmentKind,
+)
+from core.streaming import ExecutionEvent
 
 
 class WorkspaceChatApplicationService:
@@ -26,9 +32,11 @@ class WorkspaceChatApplicationService:
         self,
         execution_service: ExecutionService,
         chat_service: WorkspaceChatService | None = None,
+        intent_parser: ChatWorkflowIntentParser | None = None,
     ) -> None:
         self._execution_service = execution_service
         self._chat = chat_service or WorkspaceChatService()
+        self._intent_parser = intent_parser or ChatWorkflowIntentParser()
 
     @property
     def event_bus(self):
@@ -72,15 +80,42 @@ class WorkspaceChatApplicationService:
     ) -> ChatMessageResponse:
         workflow = None
         workflow_id = None
-        if request.trigger_workflow:
+        conversation = await self._chat.get_conversation(conversation_id)
+        attachments = self._select_attachments(conversation.attachments, request.attachment_ids)
+        intent = await self._intent_parser.parse(request.content, attachments)
+        should_resume = request.resume_workflow or intent.resume_requested
+        should_trigger = request.trigger_workflow or intent.should_trigger_workflow
+
+        if should_resume:
+            workflow_id = self._workflow_id_for_resume(request.metadata, conversation.messages)
+            if workflow_id is not None:
+                workflow_response = await self._execution_service.recover_workflow(
+                    workflow_id,
+                    metadata={"resumed_from_chat": True, "conversation_id": str(conversation_id)},
+                    progress_hook=self._chat_progress_hook(conversation_id),
+                )
+                workflow = workflow_response.model_dump(mode="json")
+                await self._chat.emit_progress(
+                    conversation_id,
+                    {
+                        "workflow_id": str(workflow_response.workflow_id),
+                        "status": workflow_response.status.value,
+                        "resumed": True,
+                    },
+                )
+        elif should_trigger:
             workflow_response = await self._execution_service.trigger_workflow(
                 TriggerWorkflowRequest(
-                    task=request.content,
+                    task=intent.normalized_task,
                     thread_id=str(conversation_id),
                     metadata={
                         "source": "workspace_chat",
                         "conversation_id": str(conversation_id),
                         "attachment_ids": [str(item) for item in request.attachment_ids],
+                        "workflow_type": intent.workflow_type.value,
+                        "intent": intent.model_dump(mode="json"),
+                        "repository_references": list(intent.repository_references),
+                        "progress_hook": self._chat_progress_hook(conversation_id),
                     },
                 )
             )
@@ -97,19 +132,74 @@ class WorkspaceChatApplicationService:
             ChatMessageRequest(
                 content=request.content,
                 attachment_ids=request.attachment_ids,
-                trigger_workflow=request.trigger_workflow,
-                metadata=request.metadata,
+                trigger_workflow=should_trigger,
+                resume_workflow=should_resume,
+                metadata={
+                    **request.metadata,
+                    "intent": intent.model_dump(mode="json"),
+                    "workflow_id": str(workflow_id) if workflow_id else None,
+                },
             ),
             workflow_id=workflow_id,
         )
-        if request.trigger_workflow:
+        if should_trigger or should_resume:
             await self._chat.add_assistant_message(
                 conversation_id,
-                "Workflow triggered. I will stream execution progress here as agents run.",
+                self._assistant_response(should_resume, workflow_id),
                 workflow_id=workflow_id,
             )
-        return ChatMessageResponse(message=message.model_dump(mode="json"), workflow=workflow)
+        return ChatMessageResponse(
+            message=message.model_dump(mode="json"),
+            workflow=workflow,
+            intent=intent.model_dump(mode="json"),
+        )
 
     async def events(self, conversation_id: UUID) -> ChatEventListResponse:
         events = await self._chat.event_bus.history(conversation_id)
         return ChatEventListResponse(events=tuple(event.model_dump(mode="json") for event in events))
+
+    def _select_attachments(
+        self,
+        attachments: tuple[WorkspaceAttachment, ...],
+        attachment_ids: tuple[UUID, ...],
+    ) -> tuple[WorkspaceAttachment, ...]:
+        if not attachment_ids:
+            return tuple()
+        requested = set(attachment_ids)
+        return tuple(attachment for attachment in attachments if attachment.id in requested)
+
+    def _chat_progress_hook(self, conversation_id: UUID):
+        async def publish(event: ExecutionEvent) -> None:
+            await self._chat.emit_progress(
+                conversation_id,
+                {
+                    "workflow_id": str(event.workflow_id) if event.workflow_id else None,
+                    "execution_id": str(event.execution_id) if event.execution_id else None,
+                    "agent_name": event.agent_name,
+                    "event_type": event.type.value,
+                    "message": event.message,
+                    "payload": event.payload,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
+        return publish
+
+    def _workflow_id_for_resume(self, metadata: dict, messages: tuple) -> UUID | None:
+        raw_workflow_id = metadata.get("workflow_id")
+        if raw_workflow_id:
+            return UUID(str(raw_workflow_id))
+        for message in reversed(messages):
+            if message.workflow_id is not None:
+                return message.workflow_id
+            raw = message.metadata.get("workflow_id")
+            if raw:
+                return UUID(str(raw))
+        return None
+
+    def _assistant_response(self, resumed: bool, workflow_id: UUID | None) -> str:
+        if resumed:
+            return "Workflow resumed. Live execution updates are streaming in this conversation."
+        if workflow_id is None:
+            return "I parsed the instruction, but no executable workflow was started."
+        return "Workflow triggered. Live execution updates are streaming in this conversation."

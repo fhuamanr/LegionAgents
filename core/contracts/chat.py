@@ -42,6 +42,29 @@ class ChatEventType(StrEnum):
     ERROR = "error"
 
 
+class ChatWorkflowType(StrEnum):
+    """Workflow families that can be initiated from chat instructions."""
+
+    FEATURE = "feature"
+    BUGFIX = "bugfix"
+    REFACTOR = "refactor"
+    REPOSITORY_ANALYSIS = "repository_analysis"
+    GENERAL_DELIVERY = "general_delivery"
+
+
+class ChatWorkflowIntent(ContractBaseModel):
+    """Parsed workflow intent from a user chat instruction."""
+
+    workflow_type: ChatWorkflowType
+    should_trigger_workflow: bool = False
+    resume_requested: bool = False
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    normalized_task: str = Field(min_length=1)
+    repository_references: tuple[str, ...] = Field(default_factory=tuple)
+    reasons: tuple[str, ...] = Field(default_factory=tuple)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class WorkspaceAttachment(ContractBaseModel):
     """Uploaded or referenced workspace input."""
 
@@ -112,5 +135,5 @@ class ChatMessageRequest(ContractBaseModel):
     content: str = Field(min_length=1)
     attachment_ids: tuple[UUID, ...] = Field(default_factory=tuple)
     trigger_workflow: bool = False
+    resume_workflow: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
-

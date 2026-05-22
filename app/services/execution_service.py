@@ -1,6 +1,7 @@
 """Execution application service."""
 
 from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -21,6 +22,7 @@ from app.schemas import (
 )
 from core.agents.runtime import AgentModelClient
 from core.streaming import (
+    ExecutionEvent,
     ExecutionEventEmitter,
     ExecutionEventType,
     ExecutionTracker,
@@ -86,6 +88,7 @@ class ExecutionService:
         metadata: dict[str, Any] = dict(request.metadata)
         if request.upload_id:
             metadata["upload_id"] = str(request.upload_id)
+        progress_hook = metadata.pop("progress_hook", None)
         workflow = WorkflowResponse(
             workflow_id=workflow_id,
             status=WorkflowStatus.RUNNING,
@@ -100,7 +103,11 @@ class ExecutionService:
         runtime = LangGraphExecutionRuntime(
             repository=self.workflow_repository,
             model_client=self._model_client,
-            event_hook=self._runtime_event_hook(workflow_id, request.thread_id),
+            event_hook=self._runtime_event_hook(
+                workflow_id,
+                request.thread_id,
+                progress_hook if callable(progress_hook) else None,
+            ),
         )
         result = await runtime.start(
             request.task,
@@ -121,6 +128,39 @@ class ExecutionService:
         )
         self._workflows[workflow_id] = final_workflow
         return final_workflow
+
+    async def recover_workflow(
+        self,
+        workflow_id: UUID,
+        metadata: dict[str, Any] | None = None,
+        progress_hook: Callable[[ExecutionEvent], Awaitable[None]] | None = None,
+    ) -> WorkflowResponse:
+        """Recover a paused persisted workflow execution when a checkpoint exists."""
+
+        workflow = self._workflows[workflow_id]
+        execution_id = workflow.metadata.get("execution_id")
+        if not execution_id:
+            return await self.resume_workflow(workflow_id, metadata or {})
+        runtime = LangGraphExecutionRuntime(
+            repository=self.workflow_repository,
+            model_client=self._model_client,
+            event_hook=self._runtime_event_hook(workflow_id, workflow.thread_id, progress_hook),
+        )
+        result = await runtime.recover(UUID(str(execution_id)))
+        updated = workflow.model_copy(
+            update={
+                "status": self._workflow_status_from_run(result.status),
+                "updated_at": datetime.now(timezone.utc),
+                "metadata": {
+                    **workflow.metadata,
+                    **(metadata or {}),
+                    "runtime_status": result.status.value,
+                    "checkpoint_count": len(result.checkpoints),
+                },
+            }
+        )
+        self._workflows[workflow_id] = updated
+        return updated
 
     async def get_workflow(self, workflow_id: UUID) -> WorkflowResponse:
         return self._workflows[workflow_id]
@@ -219,7 +259,12 @@ class ExecutionService:
             },
         )
 
-    def _runtime_event_hook(self, workflow_id: UUID, thread_id: str | None):
+    def _runtime_event_hook(
+        self,
+        workflow_id: UUID,
+        thread_id: str | None,
+        progress_hook: Callable[[ExecutionEvent], Awaitable[None]] | None = None,
+    ):
         async def emit_runtime_event(event_name: str, state: dict[str, Any]) -> None:
             agent_name = str(state.get("next_agent") or state.get("last_agent") or "")
             event_type = self._runtime_event_type(event_name, agent_name)
@@ -236,6 +281,8 @@ class ExecutionService:
                 },
             )
             await self.tracker.apply_event(event)
+            if progress_hook is not None:
+                await progress_hook(event)
             if agent_name in self._agent_statuses:
                 self._agent_statuses[agent_name] = self._agent_status_from_event(event_type)
 

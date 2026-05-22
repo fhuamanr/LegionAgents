@@ -270,6 +270,7 @@ class ChatMessageCreateRequest(ApiModel):
     content: str = Field(min_length=1)
     attachment_ids: tuple[UUID, ...] = Field(default_factory=tuple)
     trigger_workflow: bool = False
+    resume_workflow: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -288,6 +289,7 @@ class ChatAttachmentResponse(ApiModel):
 class ChatMessageResponse(ApiModel):
     message: dict[str, Any]
     workflow: dict[str, Any] | None = None
+    intent: dict[str, Any] | None = None
 
 
 class ChatEventListResponse(ApiModel):
