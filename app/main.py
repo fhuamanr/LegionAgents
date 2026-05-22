@@ -3,7 +3,9 @@
 from fastapi import FastAPI
 
 from app.middleware.request_id import RequestIdMiddleware
-from app.routers import agents, approvals, chat, executions, governance_management, health, observability, prompt_studio, reports, uploads, workflows, workspace_management
+from app.middleware.security import SecurityContextMiddleware
+from app.routers import agents, approvals, chat, executions, governance_management, health, observability, prompt_studio, reports, security, uploads, workflows, workspace_management
+from app.dependencies.container import get_security_service
 from app.websocket.routes import router as websocket_router
 
 
@@ -15,7 +17,9 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(SecurityContextMiddleware, security_service=get_security_service())
     app.include_router(health.router)
+    app.include_router(security.router)
     app.include_router(uploads.router)
     app.include_router(chat.router)
     app.include_router(workspace_management.router)

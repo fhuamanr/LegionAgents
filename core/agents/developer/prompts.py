@@ -68,6 +68,11 @@ class DeveloperPromptBuilder:
         return "\n\n".join(sections)
 
     def _repository_section(self, analysis: RepositoryAnalysis) -> str:
+        key_files = "\n".join(
+            f"- {item.path} ({item.size_bytes} bytes)"
+            for item in analysis.files
+            if item.path.startswith("core/agents/developer/")
+        )
         files = "\n".join(f"- {item.path} ({item.size_bytes} bytes)" for item in analysis.files[:80])
         directories = "\n".join(f"- {item}" for item in analysis.directories[:80])
         languages = ", ".join(analysis.detected_languages) or "unknown"
@@ -77,6 +82,7 @@ class DeveloperPromptBuilder:
             f"Root: {analysis.root_path}\n"
             f"Detected languages: {languages}\n\n"
             f"## Directories\n\n{directories or 'None detected'}\n\n"
+            f"## Key Developer Runtime Files\n\n{key_files or 'None detected'}\n\n"
             f"## Files\n\n{files or 'None detected'}\n\n"
             f"## Test Paths\n\n{tests}"
         )

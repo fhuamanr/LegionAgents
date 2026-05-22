@@ -39,7 +39,7 @@ class FileSystemRepositoryAnalyzer(RepositoryAnalyzer):
         ".yml": "yaml",
     }
 
-    def __init__(self, max_files: int = 300) -> None:
+    def __init__(self, max_files: int = 1000) -> None:
         self._max_files = max_files
 
     async def analyze(self, root_path: Path) -> RepositoryAnalysis:
@@ -100,4 +100,3 @@ class FileSystemRepositoryAnalyzer(RepositoryAnalyzer):
             or lowered.endswith("test.py")
             or lowered.startswith("test_")
         )
-

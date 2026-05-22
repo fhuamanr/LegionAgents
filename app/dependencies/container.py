@@ -9,6 +9,7 @@ from app.services.governance_management_service import GovernanceManagementAppli
 from app.services.chat_service import WorkspaceChatApplicationService
 from app.services.prompt_studio_service import PromptStudioApplicationService
 from app.services.workspace_management_service import WorkspaceManagementApplicationService
+from app.services.security_service import SecurityApplicationService
 
 
 class AppContainer:
@@ -22,6 +23,7 @@ class AppContainer:
         self.chat_service = WorkspaceChatApplicationService(self.execution_service)
         self.prompt_studio_service = PromptStudioApplicationService()
         self.workspace_management_service = WorkspaceManagementApplicationService()
+        self.security_service = SecurityApplicationService()
 
 
 @lru_cache(maxsize=1)
@@ -55,3 +57,7 @@ def get_prompt_studio_service() -> PromptStudioApplicationService:
 
 def get_workspace_management_service() -> WorkspaceManagementApplicationService:
     return get_container().workspace_management_service
+
+
+def get_security_service() -> SecurityApplicationService:
+    return get_container().security_service

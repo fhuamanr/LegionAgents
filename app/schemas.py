@@ -410,3 +410,51 @@ class WorkspaceProjectListResponse(ApiModel):
 
 class WorkspaceIsolationResponse(ApiModel):
     isolation: dict[str, Any]
+
+
+class TokenIssueApiRequest(ApiModel):
+    subject: str = Field(min_length=1)
+    tenant_id: str | None = None
+    workspace_id: UUID | None = None
+    roles: tuple[str, ...] = Field(default_factory=tuple)
+    permissions: tuple[str, ...] = Field(default_factory=tuple)
+    expires_in_seconds: int = Field(default=3600, ge=60)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TokenIssueResponse(ApiModel):
+    access_token: str
+    token_type: str
+    principal: dict[str, Any]
+
+
+class AccessCheckApiRequest(ApiModel):
+    required_permissions: tuple[str, ...] = Field(default_factory=tuple)
+    any_permission: bool = False
+
+
+class AccessCheckResponse(ApiModel):
+    allowed: bool
+    missing_permissions: tuple[str, ...] = Field(default_factory=tuple)
+    granted_permissions: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class AuditEventCreateRequest(ApiModel):
+    type: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    actor: str = "system"
+    tenant_id: str | None = None
+    workspace_id: UUID | None = None
+    workflow_id: UUID | None = None
+    agent_name: str | None = None
+    resource: str | None = None
+    outcome: str = "success"
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AuditEventResponse(ApiModel):
+    event: dict[str, Any]
+
+
+class AuditEventListResponse(ApiModel):
+    events: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
