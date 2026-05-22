@@ -151,3 +151,50 @@ def test_observability_api_exposes_metrics_and_analytics() -> None:
     grafana_response = client.get("/observability/exporters/grafana")
     assert grafana_response.status_code == 200
     assert grafana_response.json()["title"] == "Multi-Agent Delivery Observability"
+
+
+def test_governance_management_api_supports_versions_and_rollback() -> None:
+    client = TestClient(create_app())
+
+    first = client.post(
+        "/governance/configs",
+        json={
+            "scope": "global",
+            "kind": "gravity",
+            "name": "Global Gravity",
+            "markdown": "- Always preserve modularity.",
+            "updated_by": "admin",
+            "change_summary": "Initial governance rule.",
+        },
+    )
+    assert first.status_code == 201
+    document_id = first.json()["document"]["id"]
+
+    second = client.post(
+        "/governance/configs",
+        json={
+            "scope": "global",
+            "kind": "gravity",
+            "name": "Global Gravity",
+            "markdown": "- Always preserve modularity.\n- Always keep prompts modular.",
+            "updated_by": "admin",
+            "change_summary": "Added prompt rule.",
+        },
+    )
+    assert second.status_code == 201
+    assert second.json()["document"]["version"] >= 2
+
+    versions = client.get(f"/governance/configs/{document_id}/versions")
+    assert versions.status_code == 200
+    assert len(versions.json()["versions"]) >= 2
+
+    rollback = client.post(
+        f"/governance/configs/{document_id}/rollback",
+        json={"target_version": 1, "updated_by": "admin"},
+    )
+    assert rollback.status_code == 200
+    assert rollback.json()["document"]["markdown"] == "- Always preserve modularity."
+
+    reloads = client.get("/governance/configs/reloads")
+    assert reloads.status_code == 200
+    assert len(reloads.json()["events"]) >= 3

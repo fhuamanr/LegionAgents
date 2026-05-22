@@ -29,6 +29,10 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 - Development Dockerfiles for hot-reload backend, frontend, and Playwright sandbox containers.
 - Nginx reverse proxy configuration for frontend, `/api/` backend traffic, health checks, and `/ws/` WebSocket upgrades.
 - Local full-stack environment template and Docker Compose platform guide.
+- Dynamic Governance Management system with editable gravity rules, anti-gravity rules, personalities, prompts, coding standards, and QA policies.
+- Versioned governance persistence with local JSON storage, rollback support, reload event history, and database-ready repository abstraction.
+- FastAPI governance management APIs for listing, saving, retrieving, version history, rollback, and reload history.
+- Frontend governance dashboard page with markdown editor, preview, agent/global document selectors, version history, and rollback controls.
 
 ### Changed
 
@@ -43,4 +47,5 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 - Frontend production build: passed.
 - Docker Compose local and production configurations: validated.
 - Root full-platform Docker Compose configuration: validated.
+- Dynamic governance management backend tests and frontend build: validated.
 - Kubernetes staging and production Kustomize overlays: rendered successfully.

@@ -242,6 +242,7 @@ flowchart TB
 - QA Execution Sandbox with isolated browser sessions, screenshot/video/log/evidence artifact generation, and Docker/Kubernetes-ready execution config.
 - Human Approval Workflow with approval gates, manual reviews, retry approvals, PR approvals, QA override approvals, workflow pauses, reviewer tracking, and resume decisions.
 - Agent Governance Engine with global policies, local override controls, rule inheritance, policy merging, standards registry, markdown loading, and runtime validation.
+- Dynamic Governance Management UI and APIs for editing gravity rules, anti-gravity rules, personalities, prompts, coding standards, and QA policies with live persistence, version history, rollback, and reload events.
 - Real-time execution streaming with async event bus, execution tracker, timeline generator, structured logging, telemetry layer, and WebSocket-ready events.
 - Observability and telemetry architecture with metrics, tracing, execution telemetry, workflow analytics, agent analytics, error tracking, Prometheus text output, OpenTelemetry-ready spans, Datadog-ready JSON, and Grafana dashboard models.
 - FastAPI backend with modular routers for workflows, executions, uploads, agent status, approvals, observability, health checks, QA reports, generated docs, PR summaries, and WebSocket execution events.
@@ -279,6 +280,7 @@ Core API areas:
 - execution status and logs
 - agent status
 - approval gate creation, decisions, pause state, and resume state
+- governance configuration editing, version history, rollback, and reload history
 - observability snapshots, metrics, workflow analytics, agent analytics, and exporter payloads
 - QA report retrieval
 - generated documentation retrieval
@@ -297,6 +299,7 @@ The dashboard is located in `frontend/` and uses:
 - Lucide icons
 - Mermaid rendering
 - approval gate visualization
+- governance markdown editor and version history
 - observability analytics panels
 - WebSocket-ready execution streaming
 
@@ -410,6 +413,7 @@ Current test coverage validates:
 - autonomous repository runtime
 - QA execution sandbox
 - human approval workflow
+- dynamic governance management
 - governance policy loading, inheritance, merging, and validation
 - execution streaming, timelines, logs, and telemetry
 - observability metrics, traces, analytics, exporters, and API routes

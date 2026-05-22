@@ -35,6 +35,16 @@ from core.contracts.context import (
     ContextSource,
 )
 from core.contracts.execution import AgentExecutionRequest, AgentExecutionResult
+from core.contracts.governance_management import (
+    GovernanceConfigDocument,
+    GovernanceConfigKind,
+    GovernanceConfigScope,
+    GovernanceConfigUpsert,
+    GovernanceConfigVersion,
+    GovernanceReloadEvent,
+    GovernanceReloadStatus,
+    GovernanceRollbackRequest,
+)
 from core.contracts.ingestion import (
     ExtractedEpic,
     ExtractedStory,
@@ -205,6 +215,14 @@ __all__ = [
     "ExtractedEpic",
     "ExtractedStory",
     "GitCommandResult",
+    "GovernanceConfigDocument",
+    "GovernanceConfigKind",
+    "GovernanceConfigScope",
+    "GovernanceConfigUpsert",
+    "GovernanceConfigVersion",
+    "GovernanceReloadEvent",
+    "GovernanceReloadStatus",
+    "GovernanceRollbackRequest",
     "IngestionSource",
     "IngestionSourceType",
     "IngestionValidationIssue",

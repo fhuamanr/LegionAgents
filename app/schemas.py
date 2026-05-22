@@ -169,3 +169,38 @@ class WorkflowAnalyticsResponse(ApiModel):
 
 class AgentAnalyticsResponse(ApiModel):
     agents: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class GovernanceConfigUpsertRequest(ApiModel):
+    scope: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    markdown: str = ""
+    agent_name: str | None = None
+    updated_by: str = Field(default="system", min_length=1)
+    change_summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GovernanceRollbackApiRequest(ApiModel):
+    target_version: int = Field(ge=1)
+    updated_by: str = Field(default="system", min_length=1)
+    change_summary: str | None = None
+
+
+class GovernanceConfigResponse(ApiModel):
+    document: dict[str, Any]
+    latest_version: dict[str, Any] | None = None
+    reload_event: dict[str, Any] | None = None
+
+
+class GovernanceConfigListResponse(ApiModel):
+    documents: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class GovernanceVersionListResponse(ApiModel):
+    versions: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class GovernanceReloadHistoryResponse(ApiModel):
+    events: tuple[dict[str, Any], ...] = Field(default_factory=tuple)

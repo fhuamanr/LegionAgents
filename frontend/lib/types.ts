@@ -178,6 +178,38 @@ export interface ObservabilitySummary {
   };
 }
 
+export type GovernanceConfigScope = "global" | "agent";
+
+export type GovernanceConfigKind =
+  | "gravity"
+  | "anti_gravity"
+  | "personality"
+  | "prompt"
+  | "coding_standards"
+  | "qa_policy";
+
+export interface GovernanceConfigDocument {
+  readonly id: string;
+  readonly scope: GovernanceConfigScope;
+  readonly kind: GovernanceConfigKind;
+  readonly name: string;
+  readonly markdown: string;
+  readonly agentName?: string;
+  readonly version: number;
+  readonly updatedBy: string;
+  readonly updatedAt: string;
+}
+
+export interface GovernanceConfigVersion {
+  readonly id: string;
+  readonly documentId: string;
+  readonly version: number;
+  readonly markdown: string;
+  readonly changedBy: string;
+  readonly changeSummary?: string;
+  readonly createdAt: string;
+}
+
 export interface DashboardSnapshot {
   readonly workflowId: string;
   readonly agents: readonly AgentSummary[];
@@ -190,5 +222,9 @@ export interface DashboardSnapshot {
   readonly pullRequest: PullRequestSummary;
   readonly approvals: readonly ApprovalGate[];
   readonly observability: ObservabilitySummary;
+  readonly governance: {
+    readonly documents: readonly GovernanceConfigDocument[];
+    readonly versions: readonly GovernanceConfigVersion[];
+  };
   readonly mermaid: string;
 }
