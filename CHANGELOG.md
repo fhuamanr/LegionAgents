@@ -4,52 +4,64 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 
 ## Unreleased
 
-### Added
+### Platform Foundation
 
-- Foundational contract system with typed Pydantic schemas for agents, artifacts, context, execution, memory, prompts, outputs, workflow state, ingestion, repository runtime, QA sandbox, approvals, observability, and deployment-facing APIs.
-- Context loading system for markdown and Mermaid sources.
-- Context engineering system with dynamic selection, compression, isolation, repository summaries, architecture summaries, token budgeting, memory-aware loading, and future vector retrieval compatibility.
-- Shared memory system with short-term memory, long-term memory, execution history, ADR memory, bug memory, namespaces, thread awareness, agent isolation, checkpoint-compatible records, and vector-ready interfaces.
-- LangGraph orchestration layer with typed graph state, supervisor routing, agent nodes, conditional edges, retry loops, QA rejection loops, workflow transitions, and execution metadata.
-- Reusable runtime foundation with `BaseAgent`, `AgentExecutor`, prompt building, context assembly, output validation, retry engine, logging hooks, and tool registry.
-- Executable Developer Agent runtime with dynamic markdown rule loading, repository analysis, structured development outputs, retry-safe execution, and telemetry hooks.
-- Autonomous QA Agent runtime with test generation, Playwright/Selenium automation boundaries, screenshots, bug reporting, severity classification, evidence, logs, and coverage output contracts.
-- Context-aware governance engine with global policies, agent-local policies, rule inheritance, local override rules, markdown policy loading, policy validation, and enterprise standards registry.
-- Real-time execution streaming with async event bus, structured execution events, progress tracking, timelines, structured logs, and telemetry fan-out.
-- FastAPI backend with modular routers for workflows, uploads, executions, agents, reports, approvals, observability, health checks, and WebSocket-ready execution streams.
-- Next.js dashboard using TypeScript, Tailwind, Shadcn-style primitives, Lucide icons, dark mode, responsive layout, workflow visualization, agent status, execution timeline, live logs, QA reports, screenshots, docs, Mermaid diagrams, PR summaries, approval gates, and observability panels.
-- User Story Ingestion Engine for markdown, txt, docx, pdf, and future Jira/Notion ingestion with parsing, normalization, epic/story extraction, acceptance criteria extraction, validation, and requirement classification.
-- Autonomous Repository Engine with isolated workspaces, secure Git service layer, repository cloning, branch creation, diff analysis, commit generation, PR preparation, repository metadata extraction, summaries, and future GitHub/GitLab provider boundaries.
-- QA Execution Sandbox architecture with isolated browser sessions, Playwright/Selenium driver boundaries, screenshot storage, execution recordings, logs, test evidence, secure artifact storage, retry-safe execution, and Docker/Kubernetes-ready configuration.
-- Human Approval Workflow system with approval gates, manual reviews, workflow pauses, retry approvals, PR approvals, QA override approvals, reviewer tracking, approval metadata, execution resume decisions, LangGraph helpers, FastAPI APIs, and dashboard visualization.
-- Observability and Telemetry architecture with structured logging support, metrics, traces, execution telemetry, workflow analytics, agent analytics, error tracking, token usage, prompt size tracking, Prometheus text output, OpenTelemetry-ready span export, Datadog-ready JSON, and Grafana-ready dashboard models.
-- Production deployment architecture with backend, frontend, and QA sandbox Dockerfiles; local and production Compose files; environment templates; production configuration; future Kubernetes manifests; storage architecture; Redis/PostgreSQL extension points; and CI workflow.
-- Deployment documentation with Mermaid diagrams for container topology, request/streaming flow, storage architecture, and CI/CD readiness.
-- Full root Docker Compose platform with frontend, FastAPI backend, LangGraph runtime, PostgreSQL, Redis, Qdrant, Playwright sandbox, Selenium sandbox, MinIO object storage, Nginx reverse proxy, isolated networks, persistent volumes, hot reload, startup dependencies, and health checks.
-- Development Dockerfiles for hot-reload backend, frontend, and Playwright sandbox containers.
-- Nginx reverse proxy configuration for frontend, `/api/` backend traffic, health checks, and `/ws/` WebSocket upgrades.
-- Local full-stack environment template and Docker Compose platform guide.
-- Dynamic Governance Management system with editable gravity rules, anti-gravity rules, personalities, prompts, coding standards, and QA policies.
-- Versioned governance persistence with local JSON storage, rollback support, reload event history, and database-ready repository abstraction.
-- FastAPI governance management APIs for listing, saving, retrieving, version history, rollback, and reload history.
-- Frontend governance dashboard page with markdown editor, preview, agent/global document selectors, version history, and rollback controls.
-- AI Workspace Chat system with persisted conversations, markdown/text/PDF/DOCX upload records, URL ingestion references, Git repository references, repository path references, chat messages, and workflow triggering.
-- Chat WebSocket streaming endpoint for conversation-scoped events and execution progress updates.
-- Workspace frontend page with chat transcript, markdown-friendly rendering, attachment/reference panel, multi-source upload actions, and workflow trigger controls.
+- Added typed Pydantic contracts for agents, artifacts, context, execution, memory, prompts, outputs, workflow state, ingestion, repository operations, QA sandboxing, approvals, observability, deployment, workspaces, prompt studio, PR review, and security/audit.
+- Added reusable async runtime foundation with `BaseAgent`, `AgentExecutor`, prompt building, context assembly, output validation, retry engine, logging hooks, and tool registry.
+- Added LangGraph orchestration infrastructure with typed state, supervisor routing, agent nodes, conditional edges, retry loops, QA rejection loops, and workflow metadata.
+
+### Agent Systems
+
+- Added executable Developer Agent runtime with markdown rule loading, repository analysis, structured development outputs, retries, and telemetry hooks.
+- Added autonomous QA Agent runtime with unit/integration/browser test output contracts, Playwright/Selenium boundaries, screenshots, bug reports, severity classification, evidence, logs, and coverage summaries.
+
+### Context, Memory, and Governance
+
+- Added context loading for markdown and Mermaid sources.
+- Added context engineering with dynamic selection, compression, token budgeting, repository/architecture summaries, memory-aware loading, and context leakage prevention.
+- Added shared memory system with short-term, long-term, execution history, ADR, bug, checkpoint, namespace, and vector-ready memory.
+- Added Multi-Agent Memory Intelligence with semantic indexing, retrieval, historical bug memory, ADR memory, coding pattern memory, QA learning memory, execution history indexing, and Qdrant-ready vector store boundaries.
+- Added governance engine with global/local policies, inheritance, override controls, markdown loading, standards registry, merging, and runtime validation.
+- Added dynamic governance management APIs and dashboard with version history, rollback, reload events, and local JSON persistence.
+
+### Workspaces, Security, and Audit
+
+- Added tenant-aware multi-workspace architecture with projects, repository bindings, workspace permissions, workspace-specific agents, and isolated storage/memory/governance namespaces.
+- Added Enterprise Security and Audit system with JWT service, RBAC roles/permissions, optional security middleware, route dependency helpers, immutable hash-chained audit events, and audit APIs.
+
+### Repository, Review, and Delivery Automation
+
+- Added Autonomous Repository Engine with isolated workspaces, secure Git commands, cloning, branching, diff analysis, commit generation, PR preparation, metadata extraction, and provider boundaries.
+- Added Repository Intelligence Engine with local/mounted scanning, future GitHub boundary, architecture detection, framework detection, dependency graph generation, module relationships, and summaries.
+- Added Autonomous PR Review System with architecture, coding standards, QA, security, documentation validation, structured review comments, severity classification, and merge readiness scoring.
+- Added User Story Ingestion Engine for markdown, txt, docx, pdf, and future Jira/Notion adapters with parsing, normalization, story/epic extraction, acceptance criteria extraction, validation, and classification.
+
+### QA, Approvals, Observability, and Streaming
+
+- Added QA Execution Sandbox architecture with isolated Playwright/Selenium sessions, screenshots, videos, logs, evidence, artifact storage, retry safety, and Docker/Kubernetes-ready configuration.
+- Added Human Approval Workflow with approval gates, manual reviews, retry approvals, PR approvals, QA override approvals, workflow pauses, reviewer tracking, metadata, and resume decisions.
+- Added real-time execution streaming with async event bus, structured events, progress tracking, timelines, structured logs, telemetry fan-out, WebSocket-ready streams, and live workflow graph snapshots.
+- Added observability architecture with structured logging, metrics, tracing, workflow analytics, agent analytics, error tracking, token usage, prompt size tracking, Prometheus text output, OpenTelemetry-ready spans, Datadog-ready JSON, and Grafana-ready dashboard models.
+
+### Prompt and Dashboard Experience
+
+- Added Prompt Engineering Studio with prompt editing, markdown support, variable injection, live testing, execution preview, token estimation, versioning, comparison, rollback, and APIs/UI.
+- Added AI Workspace Chat with persisted conversations, uploads, URL references, Git references, repository path references, chat events, WebSocket streaming, and workflow triggering.
+- Added Next.js dashboard with workspace management, chat, workflow visualization, live logs, execution timelines, agent status, approvals, observability, QA reports, screenshots, generated docs, PR summaries, Mermaid rendering, governance editor, and Prompt Studio.
+
+### Deployment
+
+- Added production deployment architecture with backend, frontend, QA sandbox Dockerfiles, local/prod Compose assets, environment templates, production config, CI workflow, Kubernetes-ready manifests, storage architecture, Redis/PostgreSQL extension points, and object storage boundaries.
+- Added root Docker Compose stack with frontend, FastAPI backend, LangGraph runtime, PostgreSQL, Redis, Qdrant, Playwright sandbox, Selenium sandbox, MinIO, Nginx reverse proxy, isolated networks, persistent volumes, hot reload, health checks, and startup dependencies.
 
 ### Changed
 
-- README now reflects the full platform architecture, deployment structure, observability, approvals, repository automation, QA sandboxing, and ingestion systems.
-- Mermaid diagrams were expanded to show platform layers, delivery workflow, runtime execution, context/memory/governance, dashboard streaming, and production deployment.
-- `.gitignore` now allows safe deployment environment templates while continuing to ignore real environment files and secrets.
+- Refactored README into an operator-focused overview with optimized Mermaid diagrams, concise capability map, Docker-first startup commands, and current API/UI surfaces.
+- Stabilized Developer Agent repository prompt context as the platform grew by increasing repository scan coverage and surfacing key developer runtime files separately.
+- `.gitignore` keeps real secrets ignored while allowing safe deployment environment templates.
 
 ### Verified
 
-- Backend test suite: `67 passed`.
+- Backend suite: `89 passed`.
 - Frontend typecheck: passed.
-- Frontend production build: passed.
-- Docker Compose local and production configurations: validated.
-- Root full-platform Docker Compose configuration: validated.
-- Dynamic governance management backend tests and frontend build: validated.
-- Workspace chat backend tests and frontend build: validated.
-- Kubernetes staging and production Kustomize overlays: rendered successfully.
+- Docker Compose configuration and deployment assets validated structurally.

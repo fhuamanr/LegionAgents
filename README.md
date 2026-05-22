@@ -1,8 +1,8 @@
 # Enterprise Multi-Agent Software Delivery Platform
 
-Python/LangGraph foundation for an enterprise-grade multi-agent software delivery platform with a Next.js operational dashboard.
+Python 3.12+/LangGraph foundation for an enterprise software delivery control plane. The platform coordinates specialized agents, repository automation, QA evidence, governance, approvals, prompt operations, security, audit, and a Next.js dashboard.
 
-The platform is organized around specialized agents with isolated responsibilities:
+Specialized agents remain isolated:
 
 - `ba`
 - `architect`
@@ -11,417 +11,203 @@ The platform is organized around specialized agents with isolated responsibiliti
 - `docs`
 - `pr`
 
-The implementation currently focuses on reusable platform infrastructure: contracts, AI workspace chat, user story ingestion, context engineering, shared memory, autonomous repository operations, repository intelligence, runtime execution, LangGraph orchestration, QA sandboxing, human approvals, governance, observability, real-time execution streaming, FastAPI APIs, production deployment assets, and a frontend dashboard for monitoring live workflows.
-
 ## Quick Start
 
-The default local runtime is Docker Compose. It starts the dashboard, backend APIs, LangGraph worker placeholder, PostgreSQL, Redis, Qdrant, MinIO, Playwright sandbox, Selenium sandbox, and Nginx reverse proxy.
+Docker Compose is the canonical local runtime. It starts the frontend, FastAPI backend, LangGraph worker placeholder, PostgreSQL, Redis, Qdrant, MinIO, Playwright sandbox, Selenium sandbox, and Nginx reverse proxy.
 
 ```powershell
 copy deployment\env\.env.compose.example .env.compose
 docker compose --env-file .env.compose up --build
 ```
 
-Open the platform:
+Open:
 
 ```text
-Dashboard:        http://127.0.0.1:8080/dashboard
-Backend API:      http://127.0.0.1:8080/api/health
-Frontend direct:  http://127.0.0.1:3000/dashboard
-Backend direct:   http://127.0.0.1:8000/health
-MinIO console:    http://127.0.0.1:9001
-Selenium grid:    http://127.0.0.1:4444
+Dashboard:       http://127.0.0.1:8080/dashboard
+Backend API:     http://127.0.0.1:8080/api/health
+Frontend direct: http://127.0.0.1:3000/dashboard
+Backend direct:  http://127.0.0.1:8000/health
+MinIO console:   http://127.0.0.1:9001
+Selenium grid:   http://127.0.0.1:4444
 ```
 
-Stop the platform:
+Stop or reset:
 
 ```powershell
 docker compose --env-file .env.compose down
-```
-
-Reset local service data:
-
-```powershell
 docker compose --env-file .env.compose down --volumes
 ```
 
 ## Architecture
 
 ```text
-agents/                  Agent-specific markdown rules, constraints, prompts, and diagrams
-app/                     FastAPI backend platform
-  dependencies/          Dependency injection providers
-  middleware/            Request and telemetry middleware
-  routers/               Workflow, execution, upload, agent, approval, observability, health, QA, docs, and PR APIs
-  services/              Application services over core platform abstractions
-  websocket/             WebSocket-ready execution event endpoints
-core/
-  approvals/             Human approval gates, workflow pauses, and resume decisions
-  agents/                Executable agent runtimes
-    developer/           Developer Agent runtime
-    qa/                  QA Agent runtime
-  chat/                  AI workspace chat, uploads, references, events, and conversations
-  context/               Raw context loading and section classification
-  context_engineering/   Smart context selection, compression, summaries, and budgeting
-  contracts/             Pydantic schemas and output contracts
-  governance/            Policy loading, inheritance, merging, validation, and standards registry
+agents/                  Agent-specific markdown rules, prompts, policies, diagrams
+app/                     FastAPI application, routers, services, middleware, websocket
+core/                    Clean architecture platform foundation
+  agents/                Executable Developer and QA runtimes
+  approvals/             Human gates, pauses, resume decisions
+  chat/                  AI workspace chat and workflow triggering
+  context*/              Context loading, compression, budgeting, isolation
+  contracts/             Typed Pydantic contracts
+  governance*/           Policy inheritance, validation, editable configs
   graph/                 LangGraph orchestration infrastructure
-  ingestion/             User story ingestion pipeline, parsers, normalization, validation, extraction
-  memory/                Shared memory system with local persistence
-  observability/         Metrics, tracing, analytics, error tracking, and exporter boundaries
-  prompts/               Prompt composition primitives
-  qa_sandbox/            Isolated Playwright/Selenium execution sandbox and artifacts
-  repository/            Autonomous repository runtime, Git service, workspace manager, diff analyzer
-  repository_intelligence/ Repository scanning, framework detection, dependency graphing, and architecture summaries
-  runtime/               Reusable base runtime architecture
-  streaming/             Execution event bus, telemetry, timelines, and structured logging
-deployment/              Docker, Compose, production config, Kubernetes-ready manifests, deployment docs
-frontend/                Next.js, TypeScript, Tailwind, Shadcn-style dashboard
-repository/              Shared repository standards
-tests/                   Unit tests for platform foundations
-workflows/               Future workflow definitions
-outputs/                 Generated local runtime outputs
+  ingestion/             Story/document ingestion pipeline
+  memory/                Memory plus semantic intelligence and vector boundaries
+  pr_review/             Autonomous PR review and readiness scoring
+  prompt_studio/         Prompt editing, testing, versioning, comparison, rollback
+  qa_sandbox/            Playwright/Selenium evidence sandbox
+  repository*/           Git runtime and repository intelligence
+  runtime/               Base agent runtime abstractions
+  security/              JWT, RBAC, immutable audit
+  streaming/             Event bus, logs, timelines, telemetry
+  workspaces/            Tenant-aware projects, repositories, permissions, config
+deployment/              Docker, Compose, env templates, Nginx, Kubernetes-ready assets
+frontend/                Next.js dashboard
+tests/                   Backend foundation tests
 ```
 
-## Solution Diagrams
-
-### Platform Layers
+## System Map
 
 ```mermaid
 flowchart TB
-  User["User / Delivery Lead"] --> Frontend["Next.js Dashboard"]
-  Frontend --> Api["FastAPI Backend"]
-  Frontend -. "WebSocket events" .-> Streaming["Streaming Layer"]
+  User["User / Delivery Lead"] --> UI["Next.js Dashboard"]
+  UI --> API["FastAPI Backend"]
+  UI -. "WebSocket" .-> Stream["Streaming Bus"]
 
-  Api --> Ingestion["Story Ingestion Engine"]
-  Api --> Approvals["Human Approval Workflow"]
-  Api --> Observability["Observability APIs"]
-  Api --> Graph["LangGraph Orchestration"]
+  API --> Security["Security + Audit"]
+  API --> Workspaces["Multi-Workspace Management"]
+  API --> Chat["Workspace Chat"]
+  API --> PromptStudio["Prompt Studio"]
+  API --> Governance["Governance"]
+  API --> Graph["LangGraph Orchestrator"]
+  API --> Observability["Observability"]
+
+  Workspaces --> Isolation["Storage / Memory / Governance Namespaces"]
+  Security --> RBAC["JWT + RBAC"]
+  Security --> Audit["Immutable Audit Events"]
+
   Graph --> Runtime["Agent Runtime Foundation"]
-  Runtime --> Agents["Specialized Agent Runtimes"]
-
-  Agents --> BA["BA Agent"]
-  Agents --> Architect["Architect Agent"]
-  Agents --> Developer["Developer Agent"]
-  Agents --> QA["QA Agent"]
-  Agents --> Docs["Docs Agent"]
-  Agents --> PR["PR Agent"]
+  Runtime --> BA["BA"]
+  Runtime --> Architect["Architect"]
+  Runtime --> Developer["Developer"]
+  Runtime --> QA["QA"]
+  Runtime --> Docs["Docs"]
+  Runtime --> PR["PR"]
 
   Runtime --> Context["Context Engineering"]
-  Runtime --> Memory["Shared Memory"]
-  Runtime --> Governance["Governance Engine"]
-  Runtime --> Contracts["Output Contracts"]
-  Runtime --> RepoEngine["Autonomous Repository Engine"]
-  Runtime --> QASandbox["QA Execution Sandbox"]
+  Runtime --> Memory["Semantic Memory"]
+  Runtime --> Repo["Repository Runtime + Intelligence"]
+  Runtime --> Sandbox["QA Sandbox"]
+  Runtime --> Reviews["Autonomous PR Review"]
 
-  Context --> Rules["Markdown Rules and Standards"]
-  Memory --> LocalStore["Local In-Memory Persistence"]
-  Streaming --> Timeline["Execution Timelines"]
-  Streaming --> Logs["Structured Logs"]
-  Observability --> Metrics["Metrics / Traces / Analytics"]
-  RepoEngine --> Git["Secure Git Service"]
-  QASandbox --> Evidence["Screenshots / Videos / Logs / Evidence"]
+  Stream --> Timeline["Timeline / Logs / Telemetry"]
+  Sandbox --> Evidence["Screenshots / Videos / Logs"]
+  Repo --> Git["Secure Git Operations"]
 ```
 
-### Delivery Workflow
+## Delivery Flow
 
 ```mermaid
 flowchart LR
-  Input["Markdown / TXT / DOCX / PDF Stories"] --> Ingestion["Story Ingestion and Normalization"]
-  Ingestion --> BA["BA: user stories and acceptance criteria"]
-  BA --> Architect["Architect: architecture context"]
-  Architect --> Developer["Developer: code, tests, refactor plan, PR draft"]
-  Developer --> Repo["Repository Runtime: branch, diff, commit, PR package"]
-  Repo --> QA["QA: tests, browser evidence, bug reports"]
-  QA --> Sandbox["QA Sandbox: Playwright / Selenium"]
-  Sandbox -->|evidence| QA
-  QA -->|approved| Approval["Human Gate: PR / release approval"]
-  QA -->|override requested| Approval
-  Approval -->|approved| Docs["Docs: generated documentation"]
-  QA -->|rejected with bugs| Developer
-  Docs --> PR["PR: GitLab-ready summary"]
+  Input["Stories / Docs / URLs / Repos"] --> Ingestion["Ingestion + Normalization"]
+  Ingestion --> BA["BA: stories + acceptance criteria"]
+  BA --> Architect["Architect: decisions + constraints"]
+  Architect --> Developer["Developer: implementation output"]
+  Developer --> Repo["Repository Runtime: branch / diff / commit / PR package"]
+  Repo --> Review["Autonomous PR Review"]
+  Review --> QA["QA: tests + evidence"]
+  QA --> Sandbox["Playwright / Selenium Sandbox"]
+  Sandbox --> QA
+  QA -->|approved| Docs["Docs"]
+  QA -->|rejected| Developer
+  Docs --> Approval["Human Approval Gate"]
+  Approval --> PR["PR Summary / Merge Readiness"]
 ```
 
-### Agent Runtime Execution
-
-```mermaid
-sequenceDiagram
-  participant Graph as LangGraph Node
-  participant Executor as AgentExecutor
-  participant Context as ContextAssembler
-  participant Prompts as PromptBuilder
-  participant Agent as BaseAgent Runtime
-  participant Validator as OutputValidator
-  participant Retry as RetryEngine
-  participant Stream as Event Bus
-  participant Obs as Observability
-  participant Approval as Approval Gate
-
-  Graph->>Executor: Execute isolated agent task
-  Executor->>Stream: agent_started
-  Stream->>Obs: metric and trace event
-  Executor->>Context: Assemble agent-specific context
-  Context-->>Executor: Context package
-  Executor->>Prompts: Compose modular prompt
-  Prompts-->>Executor: Prompt bundle
-  Executor->>Agent: Run async execution
-  Agent-->>Executor: Structured output candidate
-  Executor->>Validator: Validate output contract
-  alt valid output
-    Validator-->>Executor: Accepted result
-    Executor->>Stream: agent_completed
-    Stream->>Obs: duration, tokens, prompt size
-    Executor-->>Graph: Agent node result
-  else invalid or retryable failure
-    Validator-->>Executor: Validation errors
-    Executor->>Approval: optional retry approval
-    Executor->>Retry: Apply retry policy
-    Retry->>Stream: retry_started
-    Retry-->>Executor: Retry decision
-  end
-```
-
-### Context, Memory, and Governance
+## Enterprise Boundaries
 
 ```mermaid
 flowchart TB
-  Task["Agent Task"] --> Selection["Dynamic Context Selection"]
-  Selection --> Repo["Repository Summaries"]
-  Selection --> Markdown["Markdown Rule Loading"]
-  Selection --> AgentMemory["Agent-Isolated Memory"]
-  Selection --> ThreadMemory["Thread-Aware Memory"]
+  Tenant["Tenant"] --> Workspace["Workspace"]
+  Workspace --> Projects["Projects"]
+  Projects --> Repos["Repositories"]
+  Workspace --> Agents["Workspace Agent Config"]
+  Workspace --> Permissions["Members / Roles / Permissions"]
+  Workspace --> Config["Workspace Configuration"]
 
-  Repo --> Budget["Token Budgeting"]
-  Markdown --> Budget
-  AgentMemory --> Budget
-  ThreadMemory --> Budget
+  Config --> Storage["Isolated Storage Root"]
+  Config --> MemoryNS["Isolated Memory Namespace"]
+  Config --> GovernanceNS["Isolated Governance Namespace"]
 
-  Budget --> Compression["Context Compression"]
-  Compression --> Isolation["Context Isolation Guard"]
+  Security["Security Middleware"] --> Principal["Auth Principal"]
+  Principal --> RBAC["RBAC Policy"]
+  RBAC --> APIs["Protected API Dependencies"]
+  APIs --> Audit["Immutable Audit Log"]
 
-  Governance["Governance Engine"] --> GlobalRules["Global Policies"]
-  Governance --> LocalRules["Agent Local Rules"]
-  GlobalRules --> Merge["Policy Merge and Priority Resolution"]
-  LocalRules --> Merge
-  Merge --> Validation["Runtime Policy Validation"]
-
-  Isolation --> Prompt["Prompt Bundle"]
-  Validation --> Prompt
+  Audit --> PromptTrail["Prompt Audit Trail"]
+  Audit --> AgentTrail["Agent Execution Audit"]
+  Audit --> ApprovalTrail["Approval Audit"]
+  Audit --> WorkflowTrail["Workflow Audit History"]
 ```
 
-### Live Workflow Visualization
-
-```mermaid
-flowchart LR
-  Graph["LangGraph Workflow"] --> EventBus["Execution Event Bus"]
-  Runtime["Agent Runtime"] --> EventBus
-  Tracker["Execution Tracker"] --> Telemetry["Workflow Telemetry Snapshot"]
-  EventBus --> Tracker
-  EventBus --> Timeline["Timeline Generator"]
-  EventBus --> Logs["Structured Logs"]
-
-  Telemetry --> Api["GET /executions/{workflow_id}/telemetry"]
-  Timeline --> Api
-  Logs --> Api
-  EventBus --> WS["WS /ws/workflows/{workflow_id}/telemetry"]
-  EventBus --> EventWS["WS /ws/executions/{workflow_id}"]
-
-  Api --> Dashboard["Next.js Live Workflow Visualization"]
-  WS --> Dashboard
-  EventWS --> Dashboard
-
-  Dashboard --> Nodes["Execution Node Tracking"]
-  Dashboard --> Dependencies["Workflow Dependencies"]
-  Dashboard --> Mermaid["Mermaid Graph Rendering"]
-  Dashboard --> TimelineView["Timeline Visualization"]
-  Dashboard --> LogView["Live Logs"]
-
-  Nodes --> Active["Active Agents"]
-  Nodes --> Complete["Completed Agents"]
-  Nodes --> Failed["Failed Agents"]
-  Nodes --> Retries["Retries"]
-  Dependencies --> QALoop["QA Rejection Loop"]
-```
-
-### Docker Compose Platform
+## Docker Compose Topology
 
 ```mermaid
 flowchart TB
-  Browser["User Browser"] --> Nginx["Nginx Reverse Proxy :8080"]
-  Nginx --> Frontend["Frontend: Next.js :3000"]
-  Nginx --> Backend["FastAPI Backend :8000"]
-  Frontend --> Backend
-  Frontend -. "WebSocket" .-> Backend
+  Browser["Browser"] --> Nginx["Nginx :8080"]
+  Nginx --> Frontend["Next.js :3000"]
+  Nginx --> Backend["FastAPI :8000"]
+  Frontend -. "WS / HTTP" .-> Backend
 
-  Backend --> LangGraph["LangGraph Runtime Worker"]
-  Backend --> Redis["Redis Checkpoint/Event Cache"]
-  Backend --> Postgres["PostgreSQL Platform Data"]
-  Backend --> Qdrant["Qdrant Vector Store"]
-  Backend --> MinIO["MinIO Artifact Storage"]
+  Backend --> LangGraph["LangGraph Runtime"]
+  Backend --> Postgres["PostgreSQL"]
+  Backend --> Redis["Redis"]
+  Backend --> Qdrant["Qdrant"]
+  Backend --> MinIO["MinIO"]
   Backend --> Playwright["Playwright Sandbox"]
   Backend --> Selenium["Selenium Sandbox"]
 
-  Playwright --> QAArtifacts["QA Screenshots / Videos / Logs"]
-  Selenium --> QAArtifacts
-  QAArtifacts --> MinIO
-
-  subgraph EdgeNetwork["edge network"]
-    Nginx
-    Frontend
-  end
-
-  subgraph AppNetwork["app network"]
-    Backend
-    LangGraph
-  end
-
-  subgraph DataNetwork["data network"]
-    Redis
-    Postgres
-    Qdrant
-    MinIO
-  end
-
-  subgraph SandboxNetwork["sandbox network"]
-    Playwright
-    Selenium
-  end
+  Playwright --> Artifacts["QA Artifacts"]
+  Selenium --> Artifacts
+  Artifacts --> MinIO
 ```
 
-## Current Capabilities
+## Capabilities
 
-- Typed Pydantic contracts for agents, artifacts, context, execution, memory, prompts, outputs, and workflow state.
-- AI Workspace Chat with persisted conversations, uploads, URL references, Git references, repository path references, WebSocket chat streaming, and workflow triggering from chat.
-- User Story Ingestion Engine for markdown, txt, docx, pdf, and future Jira/Notion adapters.
-- Context loading from markdown and Mermaid files.
-- Context engineering with dynamic selection, compression, token budgeting, repository summaries, architecture summaries, memory retrieval, and leakage prevention.
-- Shared memory system with short-term memory, long-term memory, execution history, ADR memory, bug memory, checkpoint-compatible records, namespaces, and vector-ready interfaces.
-- Autonomous Repository Engine with isolated workspaces, secure Git commands, cloning, branching, diff analysis, commit generation, PR preparation, and summaries.
-- Repository Intelligence Engine with local and mounted repository scanning, future GitHub ingestion boundary, framework detection, dependency graph generation, module relationship detection, and architecture summarization.
-- LangGraph orchestration with supervisor routing, conditional edges, retry loops, QA rejection loops, workflow transition metadata, and minimal shared graph state.
-- Reusable runtime foundation with `BaseAgent`, `AgentExecutor`, prompt building, context assembly, output validation, retry engine, logging hooks, and tool registry.
-- Executable Developer Agent runtime with dynamic markdown rule loading, repository analysis, structured outputs, retry-safe execution, and telemetry hooks.
-- Autonomous QA Agent runtime with unit, integration, Playwright, Selenium, screenshot, bug report, severity, evidence, and coverage output contracts.
-- QA Execution Sandbox with isolated browser sessions, screenshot/video/log/evidence artifact generation, and Docker/Kubernetes-ready execution config.
-- Human Approval Workflow with approval gates, manual reviews, retry approvals, PR approvals, QA override approvals, workflow pauses, reviewer tracking, and resume decisions.
-- Agent Governance Engine with global policies, local override controls, rule inheritance, policy merging, standards registry, markdown loading, and runtime validation.
-- Dynamic Governance Management UI and APIs for editing gravity rules, anti-gravity rules, personalities, prompts, coding standards, and QA policies with live persistence, version history, rollback, and reload events.
-- Real-time execution streaming with async event bus, execution tracker, timeline generator, structured logging, telemetry layer, WebSocket-ready events, live workflow graph snapshots, and execution node tracking.
-- Observability and telemetry architecture with metrics, tracing, execution telemetry, workflow analytics, agent analytics, error tracking, Prometheus text output, OpenTelemetry-ready spans, Datadog-ready JSON, and Grafana dashboard models.
-- FastAPI backend with modular routers for workspace chat, workflows, executions, workflow telemetry, uploads, agent status, approvals, observability, health checks, QA reports, generated docs, PR summaries, and WebSocket execution events.
-- Next.js dashboard with AI workspace chat, live workflow visualization, execution graph nodes, workflow dependency rendering, agent status monitoring, approval gates, observability, execution timelines, live logs, QA reports, screenshot evidence, generated documentation, Mermaid diagrams, and PR visualization.
-- Full Docker Compose platform with frontend, FastAPI backend, LangGraph runtime, PostgreSQL, Redis, Qdrant, Playwright sandbox, Selenium sandbox, MinIO, and Nginx reverse proxy.
+- **Orchestration:** LangGraph supervisor, typed graph state, conditional routing, retries, QA rejection loops, workflow metadata.
+- **Agent Runtime:** reusable base runtime, Developer runtime, QA runtime, prompt building, context assembly, output validation, retries, telemetry hooks.
+- **Context and Memory:** markdown loading, context compression, token budgeting, isolated agent context, short/long-term memory, ADR/bug/execution history memory, semantic indexing, vector-ready retrieval, Qdrant-ready boundary.
+- **Workspace and Project Management:** tenant-aware workspaces, projects, repository bindings, workspace permissions, workspace-specific agent config, isolated storage/memory/governance namespaces.
+- **Repository Automation:** isolated Git workspaces, clone/branch/diff/commit/PR preparation, repository scanning, framework detection, dependency graphing, architecture summaries.
+- **Quality and Review:** autonomous QA output contracts, Playwright/Selenium sandbox boundaries, screenshot/log/evidence artifacts, autonomous PR review, structured comments, severity classification, merge readiness scoring.
+- **Governance and Prompts:** global and agent policies, inheritance, policy validation, editable governance UI, Prompt Engineering Studio with markdown editing, variables, preview, testing, versioning, comparison, rollback, token estimation.
+- **Security and Audit:** JWT auth boundary, RBAC roles/permissions, optional security middleware, route dependency helpers, immutable hash-chained audit events, audit APIs.
+- **Observability and Streaming:** execution event bus, live logs, timelines, workflow telemetry, metrics, traces, analytics, Prometheus/OpenTelemetry/Datadog/Grafana-ready outputs.
+- **Dashboard:** Next.js App Router UI for workspaces, chat, workflows, prompts, governance, approvals, observability, QA reports, docs, PR summaries, Mermaid diagrams.
 
-## Default Workflow
+## API Areas
 
-```text
-BA -> Architect -> Developer -> QA -> Docs -> PR
-```
+- `/auth/*` and `/audit/*`: JWT, access checks, audit events
+- `/workspaces/*`: tenants, workspaces, projects, repository bindings, isolation summary
+- `/workspace/chat/*`: chat conversations, uploads, references, workflow triggering
+- `/workflows/*` and `/executions/*`: workflow lifecycle, status, logs, telemetry
+- `/approvals/*`: gates, decisions, pauses, resumes
+- `/governance/configs/*`: editable governance, versions, rollback
+- `/prompt-studio/prompts/*`: prompt CRUD, preview, testing, versions, compare, rollback
+- `/observability/*`: metrics, traces, analytics, exporters
+- `/reports/*`, `/docs/*`, `/pr/*`: QA reports, generated docs, PR summaries
+- `/ws/*`: execution, workflow telemetry, chat streams
 
-The orchestration layer also supports:
+## Local Development
 
-- QA rejection loop: `QA -> Developer -> QA`
-- retry execution
-- conditional routing through route metadata
-- isolated agent execution
-- minimal shared graph state
-- execution metadata for UI/API consumers
-
-## Running the Platform
-
-### Docker Compose
-
-Start everything:
+Backend:
 
 ```powershell
-copy deployment\env\.env.compose.example .env.compose
-docker compose --env-file .env.compose up --build
-```
-
-Run in the background:
-
-```powershell
-docker compose --env-file .env.compose up --build -d
-```
-
-View logs:
-
-```powershell
-docker compose --env-file .env.compose logs -f backend
-docker compose --env-file .env.compose logs -f frontend
-docker compose --env-file .env.compose logs -f playwright-sandbox
-```
-
-Stop services:
-
-```powershell
-docker compose --env-file .env.compose down
-```
-
-Rebuild one service:
-
-```powershell
-docker compose --env-file .env.compose up --build backend
-```
-
-Useful local URLs:
-
-```text
-http://127.0.0.1:8080/dashboard
-http://127.0.0.1:8080/api/health
-http://127.0.0.1:8000/health
-http://127.0.0.1:3000/dashboard
-http://127.0.0.1:6333/dashboard
-http://127.0.0.1:9001
-http://127.0.0.1:4444
-```
-
-### Local Backend
-
-Use this path when developing Python services outside Docker.
-
-The FastAPI application is located in `app/`.
-
-Run the backend:
-
-```powershell
+python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Core API areas:
-
-- workflow upload and triggering
-- workspace chat conversations, uploads, references, messages, events, and workflow triggering
-- execution status and logs
-- workflow telemetry, execution graph snapshots, Mermaid workflow graph, and live visualization data
-- agent status
-- approval gate creation, decisions, pause state, and resume state
-- governance configuration editing, version history, rollback, and reload history
-- observability snapshots, metrics, workflow analytics, agent analytics, and exporter payloads
-- QA report retrieval
-- generated documentation retrieval
-- PR summary retrieval
-- health checks
-- WebSocket-ready execution and workflow telemetry streams
-
-### Local Frontend
-
-The dashboard is located in `frontend/` and uses:
-
-- Next.js App Router
-- TypeScript
-- Tailwind CSS
-- Shadcn-style UI primitives
-- Lucide icons
-- Mermaid rendering
-- AI workspace chat with uploads, repository references, and workflow trigger controls
-- approval gate visualization
-- governance markdown editor and version history
-- observability analytics panels
-- live workflow visualization
-- WebSocket-ready execution and workflow telemetry streaming
-
-Run the dashboard:
+Frontend:
 
 ```powershell
 cd frontend
@@ -429,82 +215,24 @@ npm.cmd install
 npm.cmd run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-Open:
-
-```text
-http://127.0.0.1:3000/dashboard
-```
-
-Optional integration variables:
+Optional frontend integration:
 
 ```text
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8000
 ```
 
-Without those variables, the dashboard uses typed mock data so the UI remains executable during backend integration.
-
-## Deployment Assets
-
-Production deployment assets live in `deployment/`.
-
-- Dockerfiles: `deployment/docker/`
-- Compose files: `deployment/compose/`
-- environment templates: `deployment/env/`
-- production configuration: `deployment/config/`
-- future Kubernetes manifests: `deployment/kubernetes/`
-- deployment guide: `deployment/docs/production-deployment.md`
-- full local platform guide: `deployment/docs/docker-compose-platform.md`
-- CI workflow: `.github/workflows/ci.yml`
-
-The root `docker-compose.yml` is the canonical local platform stack. It includes frontend, FastAPI backend, LangGraph runtime, PostgreSQL, Redis, Qdrant, Playwright sandbox, Selenium sandbox, MinIO, and Nginx.
-
-## Agent Rule Loading
-
-Developer runtime reads:
-
-- `agents/developer/gravity.md`
-- `agents/developer/anti-gravity.md`
-- `agents/developer/coding-standards.md`
-- `agents/developer/architecture.md`
-- `agents/developer/forbidden.md`
-- `agents/developer/naming.md`
-- `agents/developer/testing.md`
-- `agents/developer/security.md`
-
-QA runtime reads:
-
-- `agents/qa/gravity.md`
-- `agents/qa/anti-gravity.md`
-- `agents/qa/severity-rules.md`
-- `agents/qa/test-strategy.md`
-
-## Setup
-
-For Docker Compose, Docker Desktop or a compatible Docker engine is enough.
-
-For local development outside Docker, install backend dependencies:
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-Install frontend dependencies:
-
-```powershell
-cd frontend
-npm.cmd install
-```
+Without those variables, the dashboard uses typed mock data.
 
 ## Verification
 
-Run backend tests:
+Backend:
 
 ```powershell
 python -m pytest -p no:cacheprovider tests
 ```
 
-Run frontend checks:
+Frontend:
 
 ```powershell
 cd frontend
@@ -512,51 +240,25 @@ npm.cmd run typecheck
 npm.cmd run build
 ```
 
-Current test coverage validates:
+Latest verified backend suite: `89 passed`.
 
-- contract imports and schema behavior
-- context loading
-- context engineering
-- memory isolation and retrieval
-- LangGraph orchestration
-- runtime foundation
-- Developer Agent runtime
-- QA Agent runtime
-- user story ingestion
-- AI workspace chat persistence and workflow triggering
-- autonomous repository runtime
-- QA execution sandbox
-- human approval workflow
-- dynamic governance management
-- governance policy loading, inheritance, merging, and validation
-- execution streaming, timelines, logs, and telemetry
-- observability metrics, traces, analytics, exporters, and API routes
-- FastAPI backend routing and service boundaries
-- frontend type safety and production build
+## Deployment Assets
 
-## Extension Points
-
-- Add external persistence by implementing `MemoryRepository`.
-- Add Redis/PostgreSQL adapters behind the memory abstractions.
-- Add vector database support by implementing `VectorMemoryRepository`.
-- Add real browser automation by implementing `BrowserAutomationDriver`.
-- Add real Playwright/Selenium adapters behind `BrowserSandboxDriver`.
-- Add model providers by implementing `AgentModelClient`.
-- Add governance YAML support behind the policy loader.
-- Add WebSocket delivery adapters over the streaming event bus.
-- Add GitLab SaaS integration behind PR and workflow service adapters.
-- Add GitHub/GitLab repository providers behind `RepositoryProviderAdapter`.
-- Add external observability exporters behind the observability service.
-- Add production object storage for workflow and QA artifacts.
-- Add new specialized agents by creating isolated runtime packages under `core/agents/`.
+- Root local stack: `docker-compose.yml`
+- Dockerfiles: `deployment/docker/`
+- Nginx: `deployment/nginx/nginx.conf`
+- Env templates: `deployment/env/`
+- Production config: `deployment/config/`
+- Compose docs: `deployment/docs/docker-compose-platform.md`
+- Production guide: `deployment/docs/production-deployment.md`
+- Kubernetes-ready manifests: `deployment/kubernetes/`
 
 ## Design Principles
 
-- Do not collapse agent responsibilities.
+- Never collapse agent responsibilities.
 - Keep prompts modular and agent-specific.
-- Keep orchestration separate from business logic.
-- Keep context isolated per agent.
-- Keep memory thread-aware and agent-isolated.
-- Prefer reusable abstractions and typed contracts.
-- Use async-first execution boundaries.
-- Keep local infrastructure replaceable by production adapters.
+- Keep orchestration, memory, context, prompts, governance, and execution separate.
+- Keep tenant/workspace boundaries explicit.
+- Keep audit events immutable.
+- Prefer typed contracts and async-first boundaries.
+- Keep local in-memory implementations replaceable by Redis, PostgreSQL, Qdrant, object storage, and enterprise identity providers.
