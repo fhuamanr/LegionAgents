@@ -214,6 +214,20 @@ from core.contracts.states import (
     WorkflowExecutionState,
 )
 from core.contracts.workflow import WorkflowDefinition, WorkflowEdge, WorkflowState
+from core.contracts.workspaces import (
+    ProjectCreateRequest,
+    RepositoryBinding,
+    RepositoryBindingProvider,
+    Workspace,
+    WorkspaceAgentConfig,
+    WorkspaceConfiguration,
+    WorkspaceCreateRequest,
+    WorkspaceIsolationSummary,
+    WorkspaceMember,
+    WorkspacePermission,
+    WorkspaceProject,
+    WorkspaceRole,
+)
 
 __all__ = [
     "AgentContext",
@@ -347,11 +361,14 @@ __all__ = [
     "PullRequestPreparation",
     "PullRequestOutput",
     "PullRequestDraft",
+    "ProjectCreateRequest",
     "QAOutput",
     "QualityFinding",
     "RequirementCategory",
     "RequirementClassification",
     "RepositoryAgentConsumer",
+    "RepositoryBinding",
+    "RepositoryBindingProvider",
     "RepositoryArchitecturePattern",
     "RepositoryChangeKind",
     "RepositoryCloneRequest",
@@ -404,6 +421,15 @@ __all__ = [
     "WorkflowResumeDecision",
     "WorkflowAnalytics",
     "WorkflowState",
+    "Workspace",
+    "WorkspaceAgentConfig",
     "WorkspaceAttachment",
     "WorkspaceAttachmentKind",
+    "WorkspaceConfiguration",
+    "WorkspaceCreateRequest",
+    "WorkspaceIsolationSummary",
+    "WorkspaceMember",
+    "WorkspacePermission",
+    "WorkspaceProject",
+    "WorkspaceRole",
 ]

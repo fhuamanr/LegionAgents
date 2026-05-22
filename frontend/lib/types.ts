@@ -344,6 +344,71 @@ export interface WorkspaceConversationSummary {
   readonly updatedAt: string;
 }
 
+export type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
+
+export interface WorkspaceMemberSummary {
+  readonly userId: string;
+  readonly displayName: string;
+  readonly role: WorkspaceRole;
+  readonly permissions: readonly string[];
+}
+
+export interface WorkspaceAgentConfigSummary {
+  readonly agentName: AgentKey;
+  readonly enabled: boolean;
+  readonly promptProfile?: string;
+  readonly governanceProfile?: string;
+  readonly maxRetries: number;
+}
+
+export interface WorkspaceConfigurationSummary {
+  readonly storageRoot: string;
+  readonly memoryNamespace: string;
+  readonly governanceNamespace: string;
+  readonly defaultBranch: string;
+  readonly environment: string;
+}
+
+export interface RepositoryBindingSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly provider: "local" | "github" | "gitlab" | "mounted";
+  readonly uri?: string;
+  readonly path?: string;
+  readonly defaultBranch: string;
+}
+
+export interface WorkspaceProjectSummary {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly name: string;
+  readonly description: string;
+  readonly repositories: readonly RepositoryBindingSummary[];
+}
+
+export interface WorkspaceSummary {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly name: string;
+  readonly description: string;
+  readonly configuration: WorkspaceConfigurationSummary;
+  readonly members: readonly WorkspaceMemberSummary[];
+  readonly agents: readonly WorkspaceAgentConfigSummary[];
+  readonly projectIds: readonly string[];
+  readonly updatedAt: string;
+}
+
+export interface WorkspaceIsolationSummary {
+  readonly workspaceId: string;
+  readonly tenantId: string;
+  readonly storageRoot: string;
+  readonly memoryNamespace: string;
+  readonly governanceNamespace: string;
+  readonly projectCount: number;
+  readonly repositoryCount: number;
+  readonly enabledAgents: readonly AgentKey[];
+}
+
 export interface DashboardSnapshot {
   readonly workflowId: string;
   readonly agents: readonly AgentSummary[];
@@ -367,6 +432,9 @@ export interface DashboardSnapshot {
   };
   readonly workspace: {
     readonly conversations: readonly WorkspaceConversationSummary[];
+    readonly workspaces: readonly WorkspaceSummary[];
+    readonly projects: readonly WorkspaceProjectSummary[];
+    readonly isolation: readonly WorkspaceIsolationSummary[];
   };
   readonly visualization: WorkflowTelemetrySnapshot;
   readonly mermaid: string;

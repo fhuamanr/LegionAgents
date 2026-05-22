@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Activity, BookOpenText, Bug, FilePenLine, GitPullRequest, LayoutDashboard, RadioTower, UserCheck, BarChart3, ShieldCheck, MessageSquareText } from "lucide-react";
+import { Activity, BookOpenText, Boxes, Bug, FilePenLine, GitPullRequest, LayoutDashboard, RadioTower, UserCheck, BarChart3, ShieldCheck, MessageSquareText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface NavItem {
@@ -11,6 +11,7 @@ interface NavItem {
 
 const navItems: readonly NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboard/workspaces", label: "Workspaces", icon: Boxes },
   { href: "/dashboard/workspace", label: "Workspace", icon: MessageSquareText },
   { href: "/dashboard/executions", label: "Executions", icon: Activity },
   { href: "/dashboard/qa", label: "QA Reports", icon: Bug },

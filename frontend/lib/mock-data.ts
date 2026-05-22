@@ -426,6 +426,110 @@ export const mockDashboardSnapshot: DashboardSnapshot = {
     },
   },
   workspace: {
+    workspaces: [
+      {
+        id: "workspace-retail",
+        tenantId: "tenant-retail",
+        name: "Retail Delivery Workspace",
+        description: "Customer-facing commerce projects with isolated memory and governance.",
+        configuration: {
+          storageRoot: "outputs/workspaces/tenant-retail/retail-delivery-workspace",
+          memoryNamespace: "tenant-retail:retail-delivery-workspace:memory",
+          governanceNamespace: "tenant-retail:retail-delivery-workspace:governance",
+          defaultBranch: "main",
+          environment: "local",
+        },
+        members: [
+          { userId: "retail-owner", displayName: "Retail Owner", role: "owner", permissions: ["manage_workspace", "run_workflows", "view_memory"] },
+          { userId: "qa-lead", displayName: "QA Lead", role: "admin", permissions: ["manage_projects", "run_workflows"] },
+        ],
+        agents: [
+          { agentName: "ba", enabled: true, maxRetries: 2 },
+          { agentName: "architect", enabled: true, maxRetries: 2 },
+          { agentName: "developer", enabled: true, promptProfile: "retail-dev", governanceProfile: "retail-standards", maxRetries: 3 },
+          { agentName: "qa", enabled: true, promptProfile: "browser-validation", maxRetries: 2 },
+          { agentName: "docs", enabled: true, maxRetries: 1 },
+          { agentName: "pr", enabled: true, maxRetries: 1 },
+        ],
+        projectIds: ["project-storefront", "project-checkout"],
+        updatedAt: minutesAgo(3),
+      },
+      {
+        id: "workspace-platform",
+        tenantId: "tenant-platform",
+        name: "Platform Workspace",
+        description: "Internal platform foundation and shared runtime services.",
+        configuration: {
+          storageRoot: "outputs/workspaces/tenant-platform/platform-workspace",
+          memoryNamespace: "tenant-platform:platform-workspace:memory",
+          governanceNamespace: "tenant-platform:platform-workspace:governance",
+          defaultBranch: "main",
+          environment: "local",
+        },
+        members: [
+          { userId: "platform-owner", displayName: "Platform Owner", role: "owner", permissions: ["manage_workspace", "manage_agents", "run_workflows"] },
+        ],
+        agents: [
+          { agentName: "architect", enabled: true, maxRetries: 2 },
+          { agentName: "developer", enabled: true, maxRetries: 2 },
+          { agentName: "qa", enabled: true, maxRetries: 2 },
+        ],
+        projectIds: ["project-runtime"],
+        updatedAt: minutesAgo(11),
+      },
+    ],
+    projects: [
+      {
+        id: "project-storefront",
+        workspaceId: "workspace-retail",
+        name: "Storefront",
+        description: "Next.js storefront delivery.",
+        repositories: [
+          { id: "repo-storefront", name: "storefront-web", provider: "github", uri: "https://github.com/example/storefront-web.git", defaultBranch: "main" },
+        ],
+      },
+      {
+        id: "project-checkout",
+        workspaceId: "workspace-retail",
+        name: "Checkout",
+        description: "Checkout APIs and browser validation.",
+        repositories: [
+          { id: "repo-checkout-api", name: "checkout-api", provider: "gitlab", uri: "https://gitlab.com/example/checkout-api.git", defaultBranch: "main" },
+          { id: "repo-checkout-tests", name: "checkout-tests", provider: "mounted", path: "C:/repos/checkout-tests", defaultBranch: "main" },
+        ],
+      },
+      {
+        id: "project-runtime",
+        workspaceId: "workspace-platform",
+        name: "Runtime Foundation",
+        description: "Core runtime, memory, governance, and graph services.",
+        repositories: [
+          { id: "repo-platform", name: "ai-delivery-platform", provider: "local", path: "C:/Repositorios/2026/AI", defaultBranch: "main" },
+        ],
+      },
+    ],
+    isolation: [
+      {
+        workspaceId: "workspace-retail",
+        tenantId: "tenant-retail",
+        storageRoot: "outputs/workspaces/tenant-retail/retail-delivery-workspace",
+        memoryNamespace: "tenant-retail:retail-delivery-workspace:memory",
+        governanceNamespace: "tenant-retail:retail-delivery-workspace:governance",
+        projectCount: 2,
+        repositoryCount: 3,
+        enabledAgents: ["ba", "architect", "developer", "qa", "docs", "pr"],
+      },
+      {
+        workspaceId: "workspace-platform",
+        tenantId: "tenant-platform",
+        storageRoot: "outputs/workspaces/tenant-platform/platform-workspace",
+        memoryNamespace: "tenant-platform:platform-workspace:memory",
+        governanceNamespace: "tenant-platform:platform-workspace:governance",
+        projectCount: 1,
+        repositoryCount: 1,
+        enabledAgents: ["architect", "developer", "qa"],
+      },
+    ],
     conversations: [
       {
         id: "chat-001",

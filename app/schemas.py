@@ -355,3 +355,58 @@ class PromptTestResponse(ApiModel):
 
 class PromptComparisonResponse(ApiModel):
     comparison: dict[str, Any]
+
+
+class WorkspaceAgentConfigRequest(ApiModel):
+    agent_name: str = Field(min_length=1)
+    enabled: bool = True
+    prompt_profile: str | None = None
+    governance_profile: str | None = None
+    max_retries: int = Field(default=2, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RepositoryBindingApiRequest(ApiModel):
+    name: str = Field(min_length=1)
+    provider: str = Field(default="local", min_length=1)
+    uri: str | None = None
+    path: str | None = None
+    default_branch: str = "main"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceCreateApiRequest(ApiModel):
+    tenant_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    description: str = ""
+    created_by: str = Field(default="workspace-admin", min_length=1)
+    storage_root: str | None = None
+    agents: tuple[WorkspaceAgentConfigRequest, ...] = Field(default_factory=tuple)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectCreateApiRequest(ApiModel):
+    name: str = Field(min_length=1)
+    description: str = ""
+    repositories: tuple[RepositoryBindingApiRequest, ...] = Field(default_factory=tuple)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceResponse(ApiModel):
+    workspace: dict[str, Any]
+
+
+class WorkspaceListResponse(ApiModel):
+    workspaces: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class WorkspaceProjectResponse(ApiModel):
+    project: dict[str, Any]
+
+
+class WorkspaceProjectListResponse(ApiModel):
+    projects: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class WorkspaceIsolationResponse(ApiModel):
+    isolation: dict[str, Any]
