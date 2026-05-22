@@ -340,6 +340,91 @@ export const mockDashboardSnapshot: DashboardSnapshot = {
       },
     ],
   },
+  promptStudio: {
+    prompts: [
+      {
+        id: "prompt-dev-implementation",
+        name: "Developer Implementation Prompt",
+        scope: "agent",
+        agentName: "developer",
+        markdown: "# Role\nYou are the Developer Agent.\n\n# Task\nImplement {{feature}} using {{architecture_standard}}.\n\n# Output\nReturn code changes, tests, risks, and PR notes.",
+        variables: [
+          { name: "feature", description: "Feature or work item", required: true, default: "checkout workflow" },
+          { name: "architecture_standard", description: "Architecture constraint", required: true, default: "Clean Architecture" },
+        ],
+        status: "active",
+        version: 3,
+        updatedBy: "platform-admin",
+        updatedAt: minutesAgo(5),
+      },
+      {
+        id: "prompt-qa-browser",
+        name: "QA Browser Evidence Prompt",
+        scope: "agent",
+        agentName: "qa",
+        markdown: "# QA Mission\nValidate {{flow}} with browser automation.\n\nCapture screenshots, logs, and severity-classified bugs.",
+        variables: [
+          { name: "flow", description: "Critical user flow", required: true, default: "checkout" },
+        ],
+        status: "draft",
+        version: 1,
+        updatedBy: "qa-lead",
+        updatedAt: minutesAgo(16),
+      },
+    ],
+    versions: [
+      {
+        id: "prompt-version-1",
+        promptId: "prompt-dev-implementation",
+        version: 1,
+        markdown: "# Role\nYou are the Developer Agent.\n\n# Task\nImplement {{feature}}.",
+        variables: [{ name: "feature", required: true }],
+        changedBy: "system",
+        changeSummary: "Initial developer prompt.",
+        createdAt: minutesAgo(80),
+      },
+      {
+        id: "prompt-version-2",
+        promptId: "prompt-dev-implementation",
+        version: 2,
+        markdown: "# Role\nYou are the Developer Agent.\n\n# Task\nImplement {{feature}} using {{architecture_standard}}.",
+        variables: [
+          { name: "feature", required: true },
+          { name: "architecture_standard", required: true, default: "Clean Architecture" },
+        ],
+        changedBy: "platform-admin",
+        changeSummary: "Added architecture variable.",
+        createdAt: minutesAgo(36),
+      },
+      {
+        id: "prompt-version-3",
+        promptId: "prompt-dev-implementation",
+        version: 3,
+        markdown: "# Role\nYou are the Developer Agent.\n\n# Task\nImplement {{feature}} using {{architecture_standard}}.\n\n# Output\nReturn code changes, tests, risks, and PR notes.",
+        variables: [
+          { name: "feature", required: true, default: "checkout workflow" },
+          { name: "architecture_standard", required: true, default: "Clean Architecture" },
+        ],
+        changedBy: "platform-admin",
+        changeSummary: "Added structured output expectations.",
+        createdAt: minutesAgo(5),
+      },
+    ],
+    testResult: {
+      preview: {
+        rendered: "# Role\nYou are the Developer Agent.\n\n# Task\nImplement checkout workflow using Clean Architecture.\n\n# Output\nReturn code changes, tests, risks, and PR notes.",
+        missingVariables: [],
+        estimatedTokens: 39,
+        characterCount: 155,
+      },
+      executionPreview: "# Role\nYou are the Developer Agent.\n\n# Task\nImplement checkout workflow using Clean Architecture.\n\n# Output\nReturn code changes, tests, risks, and PR notes.\n\n# Test Input\nGenerate a repository-aware implementation plan.",
+      evaluation: {
+        score: 96,
+        passed: true,
+        findings: [],
+      },
+    },
+  },
   workspace: {
     conversations: [
       {

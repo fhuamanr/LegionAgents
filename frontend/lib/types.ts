@@ -254,6 +254,59 @@ export interface GovernanceConfigVersion {
   readonly createdAt: string;
 }
 
+export type PromptScope = "global" | "agent" | "workflow";
+export type PromptStatus = "draft" | "active" | "archived";
+
+export interface PromptVariableDefinition {
+  readonly name: string;
+  readonly description?: string;
+  readonly required: boolean;
+  readonly default?: string;
+}
+
+export interface PromptDocument {
+  readonly id: string;
+  readonly name: string;
+  readonly scope: PromptScope;
+  readonly agentName?: string;
+  readonly markdown: string;
+  readonly variables: readonly PromptVariableDefinition[];
+  readonly status: PromptStatus;
+  readonly version: number;
+  readonly updatedBy: string;
+  readonly updatedAt: string;
+}
+
+export interface PromptVersion {
+  readonly id: string;
+  readonly promptId: string;
+  readonly version: number;
+  readonly markdown: string;
+  readonly variables: readonly PromptVariableDefinition[];
+  readonly changedBy: string;
+  readonly changeSummary?: string;
+  readonly createdAt: string;
+}
+
+export interface PromptPreviewSummary {
+  readonly rendered: string;
+  readonly missingVariables: readonly string[];
+  readonly estimatedTokens: number;
+  readonly characterCount: number;
+}
+
+export interface PromptEvaluationSummary {
+  readonly score: number;
+  readonly passed: boolean;
+  readonly findings: readonly string[];
+}
+
+export interface PromptTestSummary {
+  readonly preview: PromptPreviewSummary;
+  readonly executionPreview: string;
+  readonly evaluation: PromptEvaluationSummary;
+}
+
 export type ChatRole = "user" | "assistant" | "system" | "workflow";
 
 export type WorkspaceAttachmentKind =
@@ -306,6 +359,11 @@ export interface DashboardSnapshot {
   readonly governance: {
     readonly documents: readonly GovernanceConfigDocument[];
     readonly versions: readonly GovernanceConfigVersion[];
+  };
+  readonly promptStudio: {
+    readonly prompts: readonly PromptDocument[];
+    readonly versions: readonly PromptVersion[];
+    readonly testResult: PromptTestSummary;
   };
   readonly workspace: {
     readonly conversations: readonly WorkspaceConversationSummary[];

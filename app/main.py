@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 
 from app.middleware.request_id import RequestIdMiddleware
-from app.routers import agents, approvals, chat, executions, governance_management, health, observability, reports, uploads, workflows
+from app.routers import agents, approvals, chat, executions, governance_management, health, observability, prompt_studio, reports, uploads, workflows
 from app.websocket.routes import router as websocket_router
 
 
@@ -23,6 +23,7 @@ def create_app() -> FastAPI:
     app.include_router(agents.router)
     app.include_router(approvals.router)
     app.include_router(governance_management.router)
+    app.include_router(prompt_studio.router)
     app.include_router(observability.router)
     app.include_router(reports.router)
     app.include_router(websocket_router)

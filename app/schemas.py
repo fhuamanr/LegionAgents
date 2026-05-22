@@ -291,3 +291,67 @@ class ChatMessageResponse(ApiModel):
 
 class ChatEventListResponse(ApiModel):
     events: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class PromptVariableRequest(ApiModel):
+    name: str = Field(min_length=1)
+    description: str | None = None
+    required: bool = True
+    default: str | None = None
+
+
+class PromptUpsertApiRequest(ApiModel):
+    name: str = Field(min_length=1)
+    scope: str = Field(default="agent", min_length=1)
+    agent_name: str | None = None
+    markdown: str = ""
+    variables: tuple[PromptVariableRequest, ...] = Field(default_factory=tuple)
+    status: str = Field(default="draft", min_length=1)
+    updated_by: str = Field(default="system", min_length=1)
+    change_summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PromptRollbackApiRequest(ApiModel):
+    target_version: int = Field(ge=1)
+    updated_by: str = Field(default="system", min_length=1)
+    change_summary: str | None = None
+
+
+class PromptPreviewApiRequest(ApiModel):
+    markdown: str
+    variables: dict[str, str] = Field(default_factory=dict)
+
+
+class PromptTestApiRequest(ApiModel):
+    prompt_id: UUID | None = None
+    markdown: str | None = None
+    variables: dict[str, str] = Field(default_factory=dict)
+    test_input: str = ""
+    expected_output: str | None = None
+    evaluator_notes: str | None = None
+
+
+class PromptResponse(ApiModel):
+    prompt: dict[str, Any]
+    latest_version: dict[str, Any] | None = None
+
+
+class PromptListResponse(ApiModel):
+    prompts: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class PromptVersionListResponse(ApiModel):
+    versions: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class PromptPreviewResponse(ApiModel):
+    preview: dict[str, Any]
+
+
+class PromptTestResponse(ApiModel):
+    result: dict[str, Any]
+
+
+class PromptComparisonResponse(ApiModel):
+    comparison: dict[str, Any]
