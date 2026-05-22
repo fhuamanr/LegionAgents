@@ -1,18 +1,49 @@
 flowchart TB
+  User["User / Delivery Lead"] --> Frontend["Next.js Dashboard"]
+  Frontend --> API["FastAPI Backend"]
+  Frontend -. "WebSocket events" .-> Streaming["Execution Streaming"]
 
-A[Task Input] --> B[Context Loader]
+  API --> Ingestion["User Story Ingestion"]
+  API --> Approvals["Human Approval Workflow"]
+  API --> Observability["Observability and Telemetry"]
+  API --> Graph["LangGraph Orchestration"]
 
-B --> C[Agent Rules]
-B --> D[Architecture]
-B --> E[Memory]
-B --> F[Current Task]
+  Ingestion --> BA["BA Agent"]
+  Graph --> BA
+  BA --> Architect["Architect Agent"]
+  Architect --> Developer["Developer Agent"]
 
-C --> G[Prompt Builder]
+  Developer --> RepoEngine["Autonomous Repository Engine"]
+  RepoEngine --> Git["Secure Git Service"]
+  Git --> Developer
 
-D --> G
-E --> G
-F --> G
+  Developer --> QA["QA Agent"]
+  QA --> QASandbox["QA Execution Sandbox"]
+  QASandbox --> Evidence["Screenshots / Videos / Logs / Test Evidence"]
+  Evidence --> QA
 
-G --> H[Codex / LLM]
+  QA -->|approved| Docs["Docs Agent"]
+  QA -->|rejected| Developer
+  QA -->|override required| Approvals
+  Approvals -->|approved| Docs
+  Docs --> PR["PR Agent"]
 
-H --> I[Structured Output]
+  Graph --> Runtime["Reusable Agent Runtime"]
+  Runtime --> Context["Context Engineering"]
+  Runtime --> Memory["Shared Memory"]
+  Runtime --> Governance["Governance Engine"]
+  Runtime --> Prompts["Prompt Builder"]
+  Runtime --> Contracts["Output Contracts"]
+
+  Context --> Prompts
+  Memory --> Prompts
+  Governance --> Prompts
+  Prompts --> LLM["Codex / LLM"]
+  LLM --> Structured["Structured Agent Outputs"]
+  Structured --> Streaming
+  Streaming --> Observability
+
+  API --> Deployment["Docker / Compose / Kubernetes-ready Deployment"]
+  Deployment -. "future" .-> Redis["Redis"]
+  Deployment -. "future" .-> Postgres["PostgreSQL"]
+  Deployment -. "future" .-> ObjectStorage["Object Storage"]
