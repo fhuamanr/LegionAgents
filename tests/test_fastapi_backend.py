@@ -38,17 +38,21 @@ def test_upload_trigger_status_logs_and_reports() -> None:
     assert workflow_response.status_code == 202
     workflow = workflow_response.json()
     workflow_id = workflow["workflow_id"]
-    assert workflow["status"] == "running"
+    assert workflow["status"] == "completed"
+    assert workflow["metadata"]["execution_id"]
+    assert workflow["metadata"]["checkpoint_count"] >= 6
 
     status_response = client.get(f"/executions/{workflow_id}/status")
     assert status_response.status_code == 200
     status = status_response.json()
-    assert status["active_agent"] == "ba"
+    assert status["active_agent"] == "pr"
+    assert status["progress_percent"] == 100.0
 
     logs_response = client.get(f"/executions/{workflow_id}/logs")
     assert logs_response.status_code == 200
     logs = logs_response.json()
     assert any(event["type"] == "agent_started" for event in logs["events"])
+    assert any(event["type"] == "PR_generated" for event in logs["events"])
 
     telemetry_response = client.get(f"/executions/{workflow_id}/telemetry")
     assert telemetry_response.status_code == 200
@@ -250,7 +254,7 @@ def test_workspace_chat_api_uploads_references_and_triggers_workflow() -> None:
         },
     )
     assert message_response.status_code == 201
-    assert message_response.json()["workflow"]["status"] == "running"
+    assert message_response.json()["workflow"]["status"] == "completed"
 
     events_response = client.get(f"/workspace/chat/conversations/{conversation_id}/events")
     assert events_response.status_code == 200

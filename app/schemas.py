@@ -22,6 +22,7 @@ class WorkflowStatus(StrEnum):
     PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class HealthResponse(ApiModel):

@@ -26,6 +26,11 @@ from core.streaming import (
     InMemoryExecutionEventBus,
     TimelineGenerator,
 )
+from core.graph import (
+    InMemoryWorkflowExecutionRepository,
+    LangGraphExecutionRuntime,
+    WorkflowRunStatus,
+)
 
 
 class ExecutionService:
@@ -36,6 +41,7 @@ class ExecutionService:
         self.emitter = ExecutionEventEmitter(self.event_bus)
         self.tracker = ExecutionTracker(self.event_bus)
         self.timeline = TimelineGenerator(self.event_bus)
+        self.workflow_repository = InMemoryWorkflowExecutionRepository()
         self._uploads: dict[UUID, StoredUpload] = {}
         self._workflows: dict[UUID, WorkflowResponse] = {}
         self._agent_statuses: dict[str, WorkflowStatus] = {
@@ -85,17 +91,29 @@ class ExecutionService:
         )
         self._workflows[workflow_id] = workflow
         await self.tracker.start_workflow(workflow_id=workflow_id, total_steps=6)
-        event = await self.emitter.emit(
-            ExecutionEventType.AGENT_STARTED,
-            workflow_id=workflow_id,
-            thread_id=request.thread_id,
-            agent_name="ba",
-            message="Workflow triggered. BA agent is ready to start.",
-            payload={"task": request.task},
+        runtime = LangGraphExecutionRuntime(
+            repository=self.workflow_repository,
+            event_hook=self._runtime_event_hook(workflow_id, request.thread_id),
         )
-        await self.tracker.apply_event(event)
-        self._agent_statuses["ba"] = WorkflowStatus.RUNNING
-        return workflow
+        result = await runtime.start(
+            request.task,
+            workflow_id=workflow_id,
+            metadata=metadata,
+        )
+        final_workflow = workflow.model_copy(
+            update={
+                "status": self._workflow_status_from_run(result.status),
+                "updated_at": datetime.now(timezone.utc),
+                "metadata": {
+                    **metadata,
+                    "execution_id": str(result.execution_id),
+                    "checkpoint_count": len(result.checkpoints),
+                    "runtime_status": result.status.value,
+                },
+            }
+        )
+        self._workflows[workflow_id] = final_workflow
+        return final_workflow
 
     async def get_workflow(self, workflow_id: UUID) -> WorkflowResponse:
         return self._workflows[workflow_id]
@@ -178,6 +196,11 @@ class ExecutionService:
     async def get_report(self, workflow_id: UUID, kind: str) -> ReportResponse:
         workflow = self._workflows[workflow_id]
         logs = await self.get_logs(workflow_id)
+        execution_id = workflow.metadata.get("execution_id")
+        latest_state: dict[str, Any] | None = None
+        if execution_id:
+            checkpoint = await self.workflow_repository.latest_checkpoint(UUID(str(execution_id)))
+            latest_state = checkpoint.state.model_dump(mode="json") if checkpoint else None
         return ReportResponse(
             workflow_id=workflow_id,
             kind=kind,
@@ -185,8 +208,77 @@ class ExecutionService:
                 "workflow_status": workflow.status.value,
                 "task": workflow.task,
                 "events": list(logs.events),
+                "latest_state": latest_state,
             },
         )
+
+    def _runtime_event_hook(self, workflow_id: UUID, thread_id: str | None):
+        async def emit_runtime_event(event_name: str, state: dict[str, Any]) -> None:
+            agent_name = str(state.get("next_agent") or state.get("last_agent") or "")
+            event_type = self._runtime_event_type(event_name, agent_name)
+            event = await self.emitter.emit(
+                event_type,
+                workflow_id=workflow_id,
+                execution_id=state.get("execution_id"),
+                thread_id=thread_id,
+                agent_name=agent_name or None,
+                message=self._runtime_event_message(event_name, agent_name),
+                payload={
+                    "attempts": state.get("attempts", {}),
+                    "status": state.get("status"),
+                },
+            )
+            await self.tracker.apply_event(event)
+            if agent_name in self._agent_statuses:
+                self._agent_statuses[agent_name] = self._agent_status_from_event(event_type)
+
+        return emit_runtime_event
+
+    def _runtime_event_type(self, event_name: str, agent_name: str) -> ExecutionEventType:
+        if event_name == "retry_started":
+            return ExecutionEventType.RETRY_STARTED
+        if event_name == "agent_failed":
+            return ExecutionEventType.QA_FAILED if agent_name == "qa" else ExecutionEventType.AGENT_FAILED
+        if event_name == "agent_completed":
+            if agent_name == "docs":
+                return ExecutionEventType.DOCS_GENERATED
+            if agent_name == "pr":
+                return ExecutionEventType.PR_GENERATED
+            return ExecutionEventType.AGENT_COMPLETED
+        return ExecutionEventType.AGENT_STARTED
+
+    def _runtime_event_message(self, event_name: str, agent_name: str) -> str:
+        labels = self._agent_labels
+        label = labels.get(agent_name, agent_name or "Workflow")
+        if event_name == "retry_started":
+            return f"{label} retry started."
+        if event_name == "agent_failed":
+            return f"{label} agent failed."
+        if event_name == "agent_completed":
+            return f"{label} agent completed."
+        return f"{label} agent started."
+
+    def _agent_status_from_event(self, event_type: ExecutionEventType) -> WorkflowStatus:
+        if event_type == ExecutionEventType.AGENT_STARTED or event_type == ExecutionEventType.RETRY_STARTED:
+            return WorkflowStatus.RUNNING
+        if event_type in {
+            ExecutionEventType.AGENT_COMPLETED,
+            ExecutionEventType.DOCS_GENERATED,
+            ExecutionEventType.PR_GENERATED,
+        }:
+            return WorkflowStatus.COMPLETED
+        return WorkflowStatus.FAILED
+
+    def _workflow_status_from_run(self, status: WorkflowRunStatus) -> WorkflowStatus:
+        if status == WorkflowRunStatus.COMPLETED:
+            return WorkflowStatus.COMPLETED
+        if status == WorkflowRunStatus.PAUSED:
+            return WorkflowStatus.PAUSED
+        if status == WorkflowRunStatus.CANCELLED:
+            return WorkflowStatus.CANCELLED
+        if status == WorkflowRunStatus.RUNNING:
+            return WorkflowStatus.RUNNING
+        return WorkflowStatus.FAILED
 
     def _telemetry_nodes(
         self,
