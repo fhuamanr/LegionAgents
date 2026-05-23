@@ -92,5 +92,5 @@ class GovernanceRuntimeContextAssembler(MarkdownRuleContextAssembler):
 
     def _build_engine(self, context_path: Path) -> AgentGovernanceEngine:
         agents_root = self._agents_root or context_path.parent
-        standards_root = self._standards_root or agents_root / "standards"
+        standards_root = self._standards_root or agents_root.parent / "repository" / "standards"
         return AgentGovernanceEngine(agents_root=agents_root, standards_root=standards_root)

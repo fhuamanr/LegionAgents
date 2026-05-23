@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from core.contracts.agents import AgentStatus
 from core.contracts.artifacts import Artifact, ArtifactKind
 from core.contracts.execution import AgentExecutionRequest, AgentExecutionResult
+from core.governance import GovernancePolicy, GovernanceRule, PolicyValidator
 from core.runtime.context import ContextAssembler, MarkdownRuleContextAssembler
 from core.runtime.models import RuntimeAgentConfig, RuntimeExecutionContext
 from core.runtime.prompts import PromptBuilder, RuntimePromptBuilder
@@ -74,7 +75,9 @@ class BaseAgent(ABC, Generic[TOutput]):
         )
 
         raw_output = await self.invoke(runtime_context)
+        await self._enforce_governance_output(runtime_context, raw_output)
         structured_output = await self._output_validator.validate(raw_output)
+        await self._enforce_governance_output(runtime_context, raw_output, structured_output)
         artifacts = await self.build_artifacts(request, structured_output)
         return AgentExecutionResult(
             execution_id=request.execution_id,
@@ -88,6 +91,42 @@ class BaseAgent(ABC, Generic[TOutput]):
                 "structured_output": structured_output.model_dump(mode="json"),
                 **self.result_metadata(structured_output),
             },
+        )
+
+    async def _enforce_governance_output(
+        self,
+        context: RuntimeExecutionContext,
+        raw_output: str,
+        structured_output: BaseModel | None = None,
+    ) -> None:
+        policy = self._governance_policy_from_context(context)
+        if policy is None:
+            return
+        validator = PolicyValidator()
+        policy_result = validator.validate_policy(policy)
+        output_result = (
+            validator.validate_runtime_text(policy, raw_output)
+            if structured_output is None
+            else validator.validate_generated_output(
+                policy,
+                agent_name=self.config.name,
+                raw_output=raw_output,
+                structured_output=structured_output,
+            )
+        )
+        errors = policy_result.errors + output_result.errors
+        if errors:
+            raise ValueError("Governance runtime rejection: " + "; ".join(errors))
+
+    def _governance_policy_from_context(self, context: RuntimeExecutionContext) -> GovernancePolicy | None:
+        rules = context.agent_context.metadata.get("governance_rules")
+        if not rules:
+            return None
+        return GovernancePolicy(
+            name=str(context.agent_context.metadata.get("governance_policy_name", "Runtime Governance Policy")),
+            scope=self.config.name,
+            rules=tuple(GovernanceRule.model_validate(rule) for rule in rules),
+            metadata={"source": "runtime_context"},
         )
 
     @abstractmethod

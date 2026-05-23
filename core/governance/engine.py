@@ -1,6 +1,7 @@
 """Centralized Agent Governance Engine."""
 
 from pathlib import Path
+from typing import Any
 
 from core.governance.inheritance import PolicyInheritanceEngine
 from core.governance.models import GovernancePolicy, GovernanceValidationResult
@@ -51,6 +52,33 @@ class AgentGovernanceEngine:
                 "policy": policy.name,
                 "policy_rule_count": len(policy.rules),
                 **runtime_result.metadata,
+            },
+        )
+
+    async def validate_generated_output(
+        self,
+        agent_name: str,
+        raw_output: str,
+        structured_output: Any | None = None,
+    ) -> GovernanceValidationResult:
+        """Validate generated output and reject policy violations."""
+
+        policy = await self.effective_policy_for_agent(agent_name)
+        policy_result = self._validator.validate_policy(policy)
+        output_result = self._validator.validate_generated_output(
+            policy,
+            agent_name=agent_name,
+            raw_output=raw_output,
+            structured_output=structured_output,
+        )
+        return GovernanceValidationResult(
+            valid=policy_result.valid and output_result.valid,
+            errors=policy_result.errors + output_result.errors,
+            warnings=policy_result.warnings + output_result.warnings,
+            metadata={
+                "policy": policy.name,
+                "policy_rule_count": len(policy.rules),
+                **output_result.metadata,
             },
         )
 

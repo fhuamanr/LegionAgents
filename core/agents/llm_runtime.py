@@ -132,7 +132,9 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
         runtime_context = runtime_context.model_copy(update={"prompt_messages": prompt_messages})
 
         raw_output = await self.invoke(runtime_context)
+        await self._enforce_governance_output(runtime_context, raw_output)
         structured_output = await self._output_validator.validate(raw_output)
+        await self._enforce_governance_output(runtime_context, raw_output, structured_output)
         if not isinstance(structured_output, DeveloperOutput):
             raise TypeError("Developer runtime must return DeveloperOutput.")
 

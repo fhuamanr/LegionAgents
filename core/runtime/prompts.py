@@ -43,7 +43,12 @@ class RuntimePromptBuilder(PromptBuilder):
 
         governance_text = context.agent_context.metadata.get("governance_text")
         if governance_text:
-            user_sections.append(f"# Inherited Governance Policy\n\n{governance_text}")
+            user_sections.append(
+                "# Runtime-Enforced Governance Policy\n\n"
+                "These gravity, anti-gravity, forbidden, and architecture rules are not advisory. "
+                "The runtime validates generated output against them and rejects invalid output.\n\n"
+                f"{governance_text}"
+            )
 
         rendered_context = context.agent_context.render()
         if rendered_context:

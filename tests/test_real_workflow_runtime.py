@@ -48,6 +48,18 @@ class WorkflowModelClient(AgentModelClient):
         raise AssertionError("Unknown agent prompt")
 
 
+class GovernanceInvalidDeveloperModelClient(WorkflowModelClient):
+    async def complete(self, messages: tuple[PromptMessage, ...]) -> str:
+        prompt = "\n\n".join(message.content for message in messages)
+        if "Agent name: developer." in prompt:
+            return (
+                '{"agent_name":"developer","summary":"Developer output without tests",'
+                '"code_changes":[{"path":"src/app.py","change_type":"update","description":"Update app",'
+                '"content":"def hello() -> str:\\n    return \\"hello\\"\\n"}]}'
+            )
+        return await super().complete(messages)
+
+
 @pytest.mark.asyncio
 async def test_real_workflow_runtime_executes_full_delivery_sequence() -> None:
     repository = InMemoryWorkflowExecutionRepository()
@@ -131,3 +143,18 @@ async def test_real_workflow_runtime_cancels_running_execution() -> None:
     assert latest.status == WorkflowRunStatus.CANCELLED
     assert "docs" not in latest.state.agent_states
     assert "pr" not in latest.state.agent_states
+
+
+@pytest.mark.asyncio
+async def test_governance_rejection_changes_workflow_execution_status() -> None:
+    runtime = LangGraphExecutionRuntime(model_client=GovernanceInvalidDeveloperModelClient())
+
+    result = await runtime.start("Deliver workflow with invalid developer output")
+    latest = await runtime.repository.latest_checkpoint(result.execution_id)
+
+    assert result.status == WorkflowRunStatus.FAILED
+    assert latest is not None
+    developer = latest.state.agent_states["developer"]
+    assert developer.status == AgentStatus.FAILED
+    record = await runtime.repository.get(result.execution_id)
+    assert any("Governance runtime rejection" in error for error in record.metadata["errors"])
