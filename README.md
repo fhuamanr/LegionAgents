@@ -1,19 +1,518 @@
 # Legion Agents - AI Software Delivery Platform
 
-Python 3.12+/LangGraph platform for chat-driven AI software delivery. The system coordinates specialized agents, repository automation, QA evidence, governance enforcement, dynamic prompt operations, audit, live streaming, and a Next.js dashboard.
+> An open-source AI-native software delivery platform for governed, observable, multi-agent engineering workflows.
 
-Specialized agents remain isolated:
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688.svg)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-Dashboard-000000.svg)](https://nextjs.org/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-1C3C3C.svg)](https://www.langchain.com/langgraph)
+[![Status](https://img.shields.io/badge/status-active%20platform%20evolution-brightgreen.svg)](#roadmap)
 
-- `ba`
-- `architect`
-- `developer`
-- `qa`
-- `docs`
-- `pr`
+Legion Agents is a serious attempt to model how modern software delivery could work when AI agents are not treated as isolated chatbots, but as governed collaborators inside a real engineering system.
 
-## Quick Start
+It brings together specialized AI agents, architecture standards, context engineering, runtime governance, repository modification, QA validation, prompt management, observability, and live workflow visualization into one evolving platform.
 
-Docker Compose is the canonical local runtime. It starts the frontend, FastAPI backend, real LangGraph recovery worker, PostgreSQL, Redis, Qdrant, MinIO, Playwright sandbox, Selenium sandbox, and Nginx reverse proxy.
+This project is not a toy agent demo. It is an AI-native SDLC foundation designed for experimentation, production hardening, and community evolution.
+
+---
+
+## Table of Contents
+
+- [Vision](#vision)
+- [Origin Story](#origin-story)
+- [Why This Exists](#why-this-exists)
+- [Core Philosophy](#core-philosophy)
+- [Key Differentiators](#key-differentiators)
+- [Architecture Overview](#architecture-overview)
+- [Delivery Workflow](#delivery-workflow)
+- [Platform Capabilities](#platform-capabilities)
+- [Governance Philosophy](#governance-philosophy)
+- [AI Workspace](#ai-workspace)
+- [Context Engineering](#context-engineering)
+- [Autonomous QA System](#autonomous-qa-system)
+- [Live Observability](#live-observability)
+- [Prompt Engineering Studio](#prompt-engineering-studio)
+- [Multi-Agent Orchestration](#multi-agent-orchestration)
+- [Docker Compose Quick Start](#docker-compose-quick-start)
+- [Screenshots](#screenshots)
+- [Demo Flow](#demo-flow)
+- [Technical Stack](#technical-stack)
+- [Enterprise Architecture](#enterprise-architecture)
+- [Current Status](#current-status)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Design Principles](#design-principles)
+- [Author](#author)
+- [Contact](#contact)
+- [License](#license)
+
+---
+
+## Vision
+
+Software delivery is becoming AI-native.
+
+But real engineering work does not happen through one giant prompt. It happens through roles, constraints, design tradeoffs, governance, testing, documentation, review, operational visibility, and organizational memory.
+
+Legion Agents is built around that reality.
+
+The vision is to create an open, extensible AI software delivery platform where specialized agents collaborate under the same kinds of expectations that shape real enterprise engineering teams:
+
+- business analysis before implementation
+- architecture before code
+- governance before execution
+- QA before release
+- documentation before handoff
+- observability across every step
+- traceability for every decision
+
+The goal is not to replace engineering judgment. The goal is to give engineers a platform where AI work becomes structured, inspectable, policy-aware, and continuously improvable.
+
+---
+
+## Origin Story
+
+Legion Agents was born from a personal need: the need for a complete AI-driven software delivery platform capable of supporting real-world software engineering workflows end to end.
+
+The agents were inspired by real collaborators and enterprise delivery roles observed during actual software projects:
+
+- business analysts who clarify intent and acceptance criteria
+- architects who protect boundaries and long-term design quality
+- developers who turn specifications into concrete repository changes
+- QA engineers who validate behavior and collect evidence
+- documentation specialists who make systems understandable
+- technical reviewers who prepare work for review and delivery
+
+The platform attempts to capture that collaborative model in software.
+
+Each agent is intentionally specialized. Each agent has its own context, rules, prompts, responsibilities, and output contracts. The system is designed to coordinate them as a delivery team, not collapse them into a single all-purpose model call.
+
+---
+
+## Why This Exists
+
+Most AI coding tools are powerful but narrow. They can generate code, explain files, or answer questions. Fewer systems try to model the full engineering lifecycle around AI execution.
+
+Legion Agents exists because serious AI software delivery needs more than code generation.
+
+It needs:
+
+- governed execution
+- runtime policy enforcement
+- context isolation
+- repository-aware implementation
+- QA evidence
+- prompt versioning
+- live observability
+- architecture-aware decisions
+- workflow replay
+- editable operating rules
+- clear boundaries between agent responsibilities
+
+The project is intended as a foundation for builders who want to experiment with AI-native delivery systems, agent governance, autonomous QA, prompt operations, and enterprise-grade engineering automation.
+
+---
+
+## Core Philosophy
+
+Legion Agents follows a few strong beliefs.
+
+### Agents Should Be Specialized
+
+The platform models a delivery organization, not a single omnipotent assistant. Each agent has a defined role, context boundary, and output contract.
+
+### Governance Should Affect Runtime Behavior
+
+Rules are not documentation only. Governance is injected into prompts, validated at runtime, and used to reject invalid outputs.
+
+### Context Is an Engineering Problem
+
+Good AI execution depends on selecting the right context at the right time. Legion Agents includes token budgeting, repository summarization, semantic file selection, architecture-aware loading, and agent context isolation.
+
+### QA Must Produce Evidence
+
+Quality cannot be a boolean hidden inside a model response. QA workflows should produce structured results, logs, screenshots, artifacts, and replayable evidence.
+
+### Prompts Are Production Assets
+
+Prompts need editing, preview, testing, versioning, rollback, token estimation, and runtime activation. Prompt operations are treated as part of the platform, not a side file.
+
+### Observability Is Non-Negotiable
+
+AI workflows must be inspectable while they run. The platform streams logs, agent state, token chunks, generated outputs, retries, QA telemetry, and workflow graph updates.
+
+---
+
+## Key Differentiators
+
+- **Real multi-agent SDLC flow:** `BA -> Architect -> Developer -> QA -> Docs -> PR`
+- **Runtime governance:** inherited policies influence prompts, validation, rejection, and execution behavior
+- **Dynamic context engineering:** task-aware loading, token budgeting, semantic repository selection, and architecture prioritization
+- **Repository modification:** clone, branch, modify files, diff, commit, and prepare PR artifacts
+- **Autonomous QA evidence:** structured QA results, sandbox boundaries, logs, screenshots, and test artifacts
+- **Live workflow visualization:** WebSocket event streams, telemetry snapshots, logs, retries, tokens, and generated outputs
+- **Prompt Engineering Studio:** prompt editing, variable injection, testing, versioning, rollback, comparison, and token estimation
+- **Editable governance:** global and agent rules, version history, rollback, reload events, and runtime policy inclusion
+- **PostgreSQL-backed persistence:** workflow records, checkpoints, uploads, prompts, governance, workspaces, and agent configuration
+- **Enterprise-ready architecture:** typed contracts, clean boundaries, audit hooks, security foundations, isolated workspaces, Docker Compose topology
+
+---
+
+## Architecture Overview
+
+```mermaid
+flowchart TB
+  User["User / Delivery Lead"] --> UI["Next.js Dashboard"]
+  UI --> API["FastAPI Backend"]
+  UI -. "Execution WebSocket" .-> ExecutionWS["/ws/executions/{workflow_id}"]
+  UI -. "Telemetry WebSocket" .-> TelemetryWS["/ws/workflows/{workflow_id}/telemetry"]
+
+  API --> Chat["AI Workspace Chat"]
+  API --> Uploads["PDF / DOCX / MD / TXT Uploads"]
+  API --> PromptStudio["Prompt Engineering Studio"]
+  API --> GovernanceEditor["Governance Editor"]
+  API --> Workspaces["Workspace + Agent Config"]
+  API --> Graph["LangGraph Runtime"]
+  API --> Persistence["PostgreSQL JSONB Persistence"]
+  API --> Observability["Observability + Audit"]
+
+  Persistence --> WorkflowRecords["Workflow Records + Checkpoints"]
+  Persistence --> PromptVersions["Prompt Versions"]
+  Persistence --> GovernanceVersions["Governance Versions"]
+  Persistence --> WorkspaceRecords["Workspace / Project / Agent Config"]
+
+  Uploads --> Ingestion["Story Ingestion Pipeline"]
+  Chat --> Graph
+  Ingestion --> Graph
+
+  Graph --> Runtime["Reusable Agent Runtime"]
+  Runtime --> Context["Context Engineering"]
+  Runtime --> Governance["Governance Engine"]
+  Runtime --> Validation["Structured Output Validation"]
+  Runtime --> LLM["OpenAI / Compatible LLM"]
+
+  Governance --> PromptRules["Policy Injection"]
+  Governance --> OutputRules["Runtime Output Validation"]
+  Context --> RepoContext["Repository + Architecture Context"]
+  PromptStudio --> RuntimePrompts["Active Runtime Prompts"]
+  RuntimePrompts --> Context
+
+  Graph --> EventBus["Execution Event Bus"]
+  EventBus --> ExecutionWS
+  EventBus --> TelemetryWS
+  EventBus --> UI
+
+  Worker["LangGraph Recovery Worker"] --> Persistence
+  Worker --> Graph
+```
+
+---
+
+## Delivery Workflow
+
+Legion Agents models an end-to-end software delivery lane.
+
+```mermaid
+flowchart LR
+  Request["User Request / Uploaded Docs / Repository Reference"] --> BA["BA Agent"]
+  BA --> Architect["Architect Agent"]
+  Architect --> Developer["Developer Agent"]
+  Developer --> Repo["Repository Runtime"]
+  Repo --> QA["QA Agent"]
+  QA -->|approved| Docs["Docs Agent"]
+  QA -->|rejected| Developer
+  Docs --> PR["PR Agent"]
+  PR --> Artifacts["PR Artifacts / Summary / Review Package"]
+
+  Developer --> Outputs["Generated Code Outputs"]
+  QA --> Evidence["QA Evidence"]
+  Docs --> Documentation["Generated Documentation"]
+
+  Outputs --> Stream["Live Execution Stream"]
+  Evidence --> Stream
+  Documentation --> Stream
+  Artifacts --> Stream
+```
+
+### Runtime Feedback Loop
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Chat as AI Workspace
+  participant Graph as LangGraph Runtime
+  participant Agent as Specialized Agent
+  participant Gov as Governance Engine
+  participant Repo as Repository Runtime
+  participant QA as QA Sandbox
+  participant UI as Live Dashboard
+
+  User->>Chat: Submit request, docs, or repository reference
+  Chat->>Graph: Trigger workflow
+  Graph->>Agent: Execute next role
+  Agent->>Gov: Load effective runtime policy
+  Gov-->>Agent: Prompt rules + validation rules
+  Agent->>UI: Stream logs and tokens
+  Agent->>Repo: Apply repository changes when developer runs
+  Repo-->>Graph: Diff, commit, PR artifacts
+  Graph->>QA: Validate implementation
+  QA->>UI: Stream evidence and QA telemetry
+  QA-->>Graph: Approve or reject
+  Graph-->>Chat: Persist workflow state and artifacts
+```
+
+---
+
+## Platform Capabilities
+
+### AI Delivery Execution
+
+- Chat-driven workflow triggering
+- Upload-driven workflow triggering
+- Repository-aware implementation
+- Multi-agent state propagation
+- Retry handling
+- QA rejection loops
+- Structured outputs and artifacts
+- Workflow history and replay foundations
+
+### Repository Automation
+
+- Isolated repository workspaces
+- Secure Git command boundaries
+- Clone, branch, diff, commit, and PR artifact preparation
+- Developer output application to real files
+- Repository intelligence, framework detection, dependency analysis, and architecture summarization
+
+### Runtime Governance
+
+- Global default rules
+- Enterprise standards
+- Agent-specific rules
+- Runtime-edited governance documents
+- Policy inheritance
+- Conflict-aware merge behavior
+- Runtime validation
+- Output rejection
+- Architecture enforcement
+
+### Prompt Operations
+
+- Prompt editing
+- Prompt preview
+- Variable injection
+- Token estimation
+- Prompt testing
+- Version history
+- Version comparison
+- Rollback
+- Active runtime prompt injection
+
+### Observability
+
+- Live execution logs
+- Token streaming
+- Agent status monitoring
+- Retry visualization
+- Generated output events
+- QA telemetry
+- Workflow graph snapshots
+- Dashboard snapshot API
+- WebSocket history replay
+
+---
+
+## Governance Philosophy
+
+Legion Agents treats governance as executable system behavior.
+
+Governance rules are loaded from multiple layers:
+
+```mermaid
+flowchart TB
+  Defaults["Global Defaults"] --> Merge["Effective Policy Merge"]
+  Standards["Repository Standards"] --> Merge
+  AgentRules["Agent Markdown Rules"] --> Merge
+  RuntimeDocs["Runtime-Edited Governance Documents"] --> Merge
+
+  Merge --> PromptInjection["Prompt Injection"]
+  Merge --> OutputValidation["Generated Output Validation"]
+  Merge --> ArchitectureValidation["Architecture Validation"]
+  Merge --> ExecutionBehavior["Execution Behavior"]
+
+  OutputValidation -->|invalid| Reject["Reject Output + Trigger Retry/Failure"]
+```
+
+This means governance can influence:
+
+- how prompts are built
+- what outputs are accepted
+- whether implementation is allowed to proceed
+- whether architecture boundaries are respected
+- whether QA expectations are satisfied
+
+The long-term goal is a policy-aware AI engineering runtime where standards are not passive documents, but active delivery constraints.
+
+---
+
+## AI Workspace
+
+The AI Workspace is the collaborative entry point for the platform.
+
+It is designed to support:
+
+- continuing conversations
+- triggering workflows from chat
+- attaching files
+- referencing repositories
+- streaming active agent output
+- showing active workflow state
+- preserving conversational context
+
+The workspace is intended to feel less like a command console and more like an engineering room where AI agents can be directed, observed, corrected, and improved.
+
+---
+
+## Context Engineering
+
+Context engineering is one of the core technical pillars of Legion Agents.
+
+The platform avoids oversized static prompts by dynamically assembling context for each agent execution.
+
+It supports:
+
+- dynamic context loading
+- token budgeting
+- repository summarization
+- semantic file selection
+- architecture-aware loading
+- upstream artifact loading
+- active prompt injection
+- governance-aware prompt sections
+- agent context isolation
+
+```mermaid
+flowchart LR
+  Task["Current Task"] --> Selector["Context Selector"]
+  Repo["Repository Files"] --> Selector
+  Rules["Agent Rules"] --> Selector
+  Prompts["Active Runtime Prompts"] --> Selector
+  Artifacts["Upstream Artifacts"] --> Selector
+  Memory["Memory Context"] --> Selector
+
+  Selector --> Budget["Token Budget Manager"]
+  Budget --> Context["Isolated Agent Context"]
+  Context --> Prompt["Runtime Prompt"]
+```
+
+The system prioritizes context that is relevant to the current task, the current agent role, and the architecture of the repository being modified.
+
+---
+
+## Autonomous QA System
+
+Legion Agents treats QA as an autonomous delivery role, not an afterthought.
+
+The QA system is designed around:
+
+- structured QA output contracts
+- test execution boundaries
+- Playwright and Selenium sandbox support
+- screenshots
+- logs
+- evidence artifacts
+- severity classification
+- QA pass/fail routing
+- rejection loops back to Developer
+
+QA output is streamed into the live dashboard and persisted as part of the workflow artifact trail.
+
+---
+
+## Live Observability
+
+AI workflows need to be visible while they run.
+
+Legion Agents streams:
+
+- running agents
+- completed agents
+- failed agents
+- retries
+- logs
+- token chunks
+- generated outputs
+- QA telemetry
+- workflow graph updates
+
+```mermaid
+flowchart TB
+  Runtime["Agent Runtime"] --> Events["Execution Events"]
+  Events --> Logs["Structured Logs"]
+  Events --> Tokens["Token Stream"]
+  Events --> Outputs["Generated Outputs"]
+  Events --> QA["QA Results"]
+  Events --> Graph["Telemetry Graph"]
+
+  Logs --> WebSocket["WebSocket Streams"]
+  Tokens --> WebSocket
+  Outputs --> WebSocket
+  QA --> WebSocket
+  Graph --> WebSocket
+  WebSocket --> Dashboard["Live Dashboard"]
+```
+
+The dashboard does not rely on dummy replay timers. It reads backend snapshots and live WebSocket streams.
+
+---
+
+## Prompt Engineering Studio
+
+Prompt Studio is the platform’s prompt operations layer.
+
+It supports:
+
+- editing prompts visually
+- previewing rendered prompts
+- injecting variables
+- estimating tokens
+- testing prompts
+- comparing versions
+- rolling back versions
+- activating prompts for runtime execution
+
+Prompts are treated as versioned operational assets. When active prompts are saved, they can be loaded into the next matching agent execution without restarting the platform.
+
+---
+
+## Multi-Agent Orchestration
+
+Legion Agents uses LangGraph to coordinate specialized AI roles.
+
+The current delivery lane is:
+
+```text
+BA -> Architect -> Developer -> QA -> Docs -> PR
+```
+
+Each agent has:
+
+- an isolated context package
+- role-specific rules
+- governance constraints
+- structured output contracts
+- retry behavior
+- runtime telemetry
+- generated artifacts
+
+The orchestrator manages state propagation, conditional routing, retries, QA rejection loops, and checkpoint persistence.
+
+---
+
+## Docker Compose Quick Start
+
+Docker Compose is the recommended local runtime.
 
 ```powershell
 copy deployment\env\.env.compose.example .env.compose
@@ -31,330 +530,315 @@ MinIO console:   http://127.0.0.1:9001
 Selenium grid:   http://127.0.0.1:4444
 ```
 
-Required for real LLM execution:
+Set your model credentials for real agent execution:
 
 ```powershell
 setx OPENAI_API_KEY "your-api-key"
 ```
 
-Stop or reset:
+Stop:
 
 ```powershell
 docker compose --env-file .env.compose down
+```
+
+Reset volumes:
+
+```powershell
 docker compose --env-file .env.compose down --volumes
 ```
 
+---
+
+## Screenshots
+
+Screenshots and hosted demos are welcome contributions.
+
+### Dashboard
+
+> Placeholder: Live workflow dashboard screenshot
+
+![Dashboard screenshot placeholder](docs/images/dashboard-placeholder.png)
+
+### AI Workspace
+
+> Placeholder: Chat-driven workflow execution screenshot
+
+![AI workspace screenshot placeholder](docs/images/workspace-placeholder.png)
+
+### Governance Editor
+
+> Placeholder: Runtime governance editing screenshot
+
+![Governance screenshot placeholder](docs/images/governance-placeholder.png)
+
+### Prompt Studio
+
+> Placeholder: Prompt versioning and preview screenshot
+
+![Prompt Studio screenshot placeholder](docs/images/prompt-studio-placeholder.png)
+
+---
+
+## Demo Flow
+
+A typical local demo flow:
+
+1. Start the Docker Compose stack.
+2. Open the dashboard.
+3. Upload a markdown, txt, DOCX, or PDF requirements document.
+4. Start a workflow from the AI Workspace.
+5. Watch the live graph execute `BA -> Architect -> Developer -> QA -> Docs -> PR`.
+6. Inspect streamed tokens, logs, outputs, retries, and QA evidence.
+7. Edit a governance rule.
+8. Re-run the workflow and observe the changed runtime behavior.
+9. Edit an active prompt in Prompt Studio.
+10. Re-run an agent and inspect the new prompt context and output.
+
+---
+
+## Technical Stack
+
+### Backend
+
+- Python 3.12+
+- FastAPI
+- Pydantic v2
+- LangGraph
+- OpenAI Python SDK
+- asyncpg
+- Playwright
+- Selenium
+
+### Frontend
+
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+- WebSocket-driven live views
+- Mermaid diagrams
+
+### Infrastructure
+
+- Docker Compose
+- PostgreSQL
+- Redis
+- Qdrant
+- MinIO
+- Nginx
+- Playwright sandbox
+- Selenium sandbox
+
+### Architecture
+
+- Clean architecture boundaries
+- Typed contracts
+- Async-first services
+- Repository adapters
+- Runtime policy validation
+- Event-driven streaming
+- Versioned prompt and governance stores
+
+---
+
+## Enterprise Architecture
+
+Legion Agents is designed around enterprise software delivery concerns.
+
+### Tenant and Workspace Boundaries
+
+Workspaces isolate projects, repositories, storage roots, governance namespaces, memory namespaces, and agent configuration.
+
+### Runtime Configuration
+
+Prompt and governance changes are persisted and loaded dynamically. Rollbacks create new versions and affect subsequent executions.
+
+### Auditability
+
+The platform includes security and audit foundations for tracking workflow operations, prompt changes, governance changes, approvals, and execution history.
+
+### Persistence
+
+PostgreSQL JSONB adapters persist critical platform state:
+
+- workflow records
+- checkpoints
+- uploads
+- Prompt Studio documents
+- prompt versions
+- governance documents
+- governance versions
+- workspaces
+- projects
+- agent configuration
+
+### Deployment
+
+The local stack includes frontend, backend, worker, PostgreSQL, Redis, Qdrant, MinIO, Nginx, Playwright, and Selenium. Kubernetes-ready assets are included for future production hardening.
+
+---
+
 ## Current Status
 
-The platform is now an operational end-to-end delivery framework. It has real execution paths for the core delivery workflow and persistent runtime configuration, while a few provider integrations remain backlog items.
+Working today:
 
-### Working Now
+- real LangGraph workflow execution
+- real OpenAI-backed structured agent runtime
+- real token streaming
+- real workflow visualization
+- real repository modification path
+- real QA runtime and sandbox boundaries
+- real context engineering
+- real runtime governance enforcement
+- real Prompt Studio versioning and rollback
+- real governance versioning and rollback
+- real PostgreSQL persistence adapters
+- real Docker Compose runtime topology
 
-- Chat-triggered and API-triggered workflows execute the real `BA -> Architect -> Developer -> QA -> Docs -> PR` LangGraph sequence.
-- Real OpenAI-backed agents run with structured output validation, retries, token streaming, and generated artifact events.
-- Developer execution can clone repositories, create branches, apply generated file changes, analyze diffs, create commits, and prepare PR artifacts.
-- QA runtime and sandbox boundaries produce structured QA results, logs, screenshots, and evidence artifacts when sandbox dependencies are available.
-- Live execution visualization uses backend snapshots and WebSocket streams; no dummy frontend replay data is used.
-- Dynamic context engineering loads task-relevant agent rules, architecture context, repository summaries, selected files, upstream artifacts, memory context, and active runtime prompts under a token budget.
-- Governance rules are inherited from defaults, repository standards, agent markdown, and runtime-edited documents; generated outputs are validated and rejected when policy is violated.
-- Prompt Studio supports editing, preview, token estimation, live test preview, versioning, comparison, rollback, and active runtime prompt injection.
-- Governance management supports global and agent documents, versioning, rollback, reload events, and immediate runtime policy inclusion.
-- File ingestion supports markdown, txt, DOCX, and PDF uploads.
-- PostgreSQL JSONB persistence is wired for workflow executions/checkpoints, API workflow/upload state, Prompt Studio, governance config, workspaces, projects, and workspace agent configuration.
-- Docker Compose runs the FastAPI backend, Next.js dashboard, PostgreSQL, Redis, Qdrant, MinIO, QA sandboxes, Nginx, and a real LangGraph recovery worker.
+Known limitations:
 
-### Backlog
+- Hosted GitHub/GitLab PR creation is not implemented yet; local PR artifacts are prepared.
+- Durable multi-process event streaming should move to Redis Streams or persisted event replay.
+- Jira and Notion ingestion adapters are backlog items.
+- Full MinIO artifact publishing is still evolving.
+- External identity provider integration is not complete.
+- Qdrant-backed retrieval is boundary-ready but not yet the default memory path.
 
-- Durable cross-process event streaming should move from the in-process execution event bus to Redis Streams or Postgres-backed event replay.
-- Repository hosting provider APIs for opening remote GitHub/GitLab PRs are still boundaries; the platform currently prepares PR artifacts locally.
-- Jira and Notion ingestion adapters are intentionally not implemented yet.
-- Full object-storage publishing for all downloadable artifacts should be completed on top of MinIO.
-- Production auth hardening should connect JWT/RBAC to an external identity provider.
-- Qdrant-backed semantic retrieval is boundary-ready; the default local memory path remains lightweight.
-- Frontend editing coverage should continue expanding so every agent/runtime setting has a polished visual management surface.
-- CI should run Docker Compose smoke tests with PostgreSQL and sandbox services enabled.
+---
 
-## Architecture
+## Roadmap
+
+### Near Term
+
+- Complete durable event replay with Redis Streams or PostgreSQL event storage.
+- Publish downloadable artifacts through MinIO.
+- Expand visual editing for workflow execution settings and agent configuration.
+- Add Docker Compose smoke tests for PostgreSQL, worker recovery, and QA sandboxes.
+- Improve generated documentation and PR artifact browsing in the dashboard.
+
+### Mid Term
+
+- Add hosted GitHub and GitLab PR creation.
+- Add Qdrant-backed semantic memory as the default retrieval layer.
+- Add external identity provider integration.
+- Add policy conflict visualization and governance diff tools.
+- Add richer workflow replay and checkpoint inspection.
+
+### Long Term
+
+- Support custom workflow graphs.
+- Support custom agent packs.
+- Support organization-level governance profiles.
+- Support marketplace-style integrations.
+- Support production-grade multi-tenant deployments.
+- Support advanced evaluation suites for agent behavior.
+
+---
+
+## Contributing
+
+Legion Agents is built for open-source collaboration.
+
+Contributions are welcome in many forms:
+
+- forks
+- experiments
+- bug reports
+- architecture discussions
+- governance rule improvements
+- prompt engineering improvements
+- UI/UX improvements
+- agent runtime improvements
+- repository provider integrations
+- QA sandbox integrations
+- documentation and diagrams
+- deployment hardening
+
+Good contribution areas:
+
+- GitHub/GitLab provider adapters
+- durable event streaming
+- MinIO artifact publishing
+- Qdrant retrieval integration
+- Jira/Notion ingestion
+- dashboard screenshots and demos
+- workflow replay UX
+- policy conflict visualization
+- evaluation harnesses for agent behavior
+
+Please open issues and discussions for larger design changes. Architecture conversations are especially welcome.
+
+---
+
+## Design Principles
+
+- Keep agent responsibilities separate.
+- Prefer explicit contracts over implicit behavior.
+- Treat prompts as production assets.
+- Treat governance as executable policy.
+- Keep context bounded, relevant, and isolated.
+- Make runtime behavior observable.
+- Preserve auditability.
+- Prefer modular extension points.
+- Build for real repositories and real QA evidence.
+- Keep the platform useful for individual builders and extensible for enterprises.
+
+---
+
+## Repository Structure
 
 ```text
 agents/                  Agent-specific markdown rules, prompts, policies, diagrams
 app/                     FastAPI application, routers, services, middleware, websocket
 core/                    Clean architecture platform foundation
-  agents/                Executable Developer and QA runtimes
-  approvals/             Human gates, pauses, resume decisions
+  agents/                Executable agent runtimes and model clients
+  approvals/             Human approval gates and resume decisions
   chat/                  AI workspace chat and workflow triggering
   context*/              Context loading, compression, budgeting, isolation
   contracts/             Typed Pydantic contracts
   governance*/           Policy inheritance, validation, editable configs
-  graph/                 LangGraph orchestration infrastructure
+  graph/                 LangGraph runtime, persistence, worker, orchestration
   ingestion/             Story/document ingestion pipeline
-  memory/                Memory plus semantic intelligence and vector boundaries
+  memory/                Memory and semantic intelligence boundaries
+  persistence/           PostgreSQL JSONB adapters
   pr_review/             Autonomous PR review and readiness scoring
-  prompt_studio/         Prompt editing, testing, versioning, comparison, rollback
+  prompt_studio/         Prompt editing, testing, versioning, rollback
   qa_sandbox/            Playwright/Selenium evidence sandbox
   repository*/           Git runtime and repository intelligence
   runtime/               Base agent runtime abstractions
   security/              JWT, RBAC, immutable audit
-  streaming/             Real event bus, token events, logs, timelines, telemetry
-  persistence/           PostgreSQL JSONB adapters for durable platform records
+  streaming/             Event bus, token events, logs, timelines, telemetry
   workspaces/            Tenant-aware projects, repositories, permissions, config
 deployment/              Docker, Compose, env templates, Nginx, Kubernetes-ready assets
 frontend/                Next.js dashboard
-tests/                   Backend foundation tests
+tests/                   Backend foundation and runtime tests
 ```
 
-## System Map
+---
 
-```mermaid
-flowchart TB
-  User["User / Delivery Lead"] --> UI["Next.js Dashboard"]
-  UI --> API["FastAPI Backend"]
-  UI --> Snapshot["GET /dashboard/snapshot"]
-  UI --> LiveStart["POST /workflows/live"]
-  UI -. "Execution WebSocket" .-> EventWS["/ws/executions/{workflow_id}"]
-  UI -. "Telemetry WebSocket" .-> TelemetryWS["/ws/workflows/{workflow_id}/telemetry"]
+## Author
 
-  API --> Security["Security + Audit"]
-  API --> Persistence["PostgreSQL JSONB Persistence"]
-  API --> Workspaces["Multi-Workspace Management"]
-  API --> Chat["Workspace Chat"]
-  API --> PromptStudio["Prompt Studio"]
-  API --> Governance["Governance"]
-  API --> Graph["LangGraph Orchestrator"]
-  API --> Observability["Observability"]
-  API --> Dashboard["Live Dashboard Snapshot Service"]
+**Fausto Huaman **
 
-  Workspaces --> Isolation["Storage / Memory / Governance Namespaces"]
-  Security --> RBAC["JWT + RBAC"]
-  Security --> Audit["Immutable Audit Events"]
+Legion Agents was created from a personal need to build a complete, AI-driven software delivery platform inspired by real software engineering collaboration.
 
-  Graph --> Runtime["Agent Runtime Foundation"]
-  Runtime --> BA["BA"]
-  Runtime --> Architect["Architect"]
-  Runtime --> Developer["Developer"]
-  Runtime --> QA["QA"]
-  Runtime --> Docs["Docs"]
-  Runtime --> PR["PR"]
-  Runtime --> TokenStream["OpenAI token streaming callback"]
+The project is intended to grow in the open with engineers, architects, QA specialists, AI builders, and platform teams interested in the future of governed AI-native software delivery.
 
-  Runtime --> Context["Context Engineering"]
-  Runtime --> Memory["Semantic Memory"]
-  Runtime --> Repo["Repository Runtime + Intelligence"]
-  Runtime --> Sandbox["QA Sandbox"]
-  Runtime --> Reviews["Autonomous PR Review"]
+---
 
-  Graph --> EventBus["ExecutionEventBus"]
-  Graph --> Worker["LangGraph Recovery Worker"]
-  Persistence --> Graph
-  Persistence --> PromptStudio
-  Persistence --> Governance
-  Persistence --> Workspaces
-  TokenStream --> EventBus
-  EventBus --> EventWS
-  EventBus --> TelemetryWS
-  EventBus --> Dashboard
-  EventBus --> Timeline["Timeline / Logs / Tokens / Outputs / QA Telemetry"]
-  Snapshot --> Dashboard
-  Sandbox --> Evidence["Screenshots / Videos / Logs"]
-  Repo --> Git["Secure Git Operations"]
-```
+## Contact
 
-## Delivery Flow
+- Email: [fhuamanr@gmail.com](mailto:fhuamanr@gmail.com)
+- Email: [chuamanr@icloud.com](mailto:chuamanr@icloud.com)
+- [![LinkedIn](https://img.shields.io/badge/LinkedIn-Carlos%20Huaman%20Rengifo-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/carloshuamanrengifo)
+- [![GitHub](https://img.shields.io/badge/GitHub-fhuamanr-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/fhuamanr)
 
-```mermaid
-flowchart LR
-  Input["Stories / Docs / URLs / Repos"] --> Ingestion["Ingestion + Normalization"]
-  Ingestion --> BA["BA: stories + acceptance criteria"]
-  BA --> Architect["Architect: decisions + constraints"]
-  Architect --> Developer["Developer: implementation output"]
-  Developer --> TokenEvents["token_streamed events"]
-  Developer --> Repo["Repository Runtime: branch / diff / commit / PR package"]
-  Repo --> Review["Autonomous PR Review"]
-  Review --> QA["QA: tests + evidence"]
-  QA --> Sandbox["Playwright / Selenium Sandbox"]
-  Sandbox --> QA
-  QA --> QATelemetry["telemetry_recorded QA result"]
-  QA -->|approved| Docs["Docs"]
-  QA -->|rejected| Developer
-  Developer --> Outputs["output_generated artifacts"]
-  QA --> Outputs
-  Docs --> Outputs
-  PR --> Outputs
-  Docs --> Approval["Human Approval Gate"]
-  Approval --> PR["PR Summary / Merge Readiness"]
-  Outputs --> LiveUI["Live dashboard panels"]
-  TokenEvents --> LiveUI
-  QATelemetry --> LiveUI
-```
 
-## Enterprise Boundaries
-
-```mermaid
-flowchart TB
-  Tenant["Tenant"] --> Workspace["Workspace"]
-  Workspace --> Projects["Projects"]
-  Projects --> Repos["Repositories"]
-  Workspace --> Agents["Workspace Agent Config"]
-  Workspace --> Permissions["Members / Roles / Permissions"]
-  Workspace --> Config["Workspace Configuration"]
-
-  Config --> Storage["Isolated Storage Root"]
-  Config --> MemoryNS["Isolated Memory Namespace"]
-  Config --> GovernanceNS["Isolated Governance Namespace"]
-
-  Security["Security Middleware"] --> Principal["Auth Principal"]
-  Principal --> RBAC["RBAC Policy"]
-  RBAC --> APIs["Protected API Dependencies"]
-  APIs --> Audit["Immutable Audit Log"]
-
-  Audit --> PromptTrail["Prompt Audit Trail"]
-  Audit --> AgentTrail["Agent Execution Audit"]
-  Audit --> ApprovalTrail["Approval Audit"]
-  Audit --> WorkflowTrail["Workflow Audit History"]
-```
-
-## Docker Compose Topology
-
-```mermaid
-flowchart TB
-  Browser["Browser"] --> Nginx["Nginx :8080"]
-  Nginx --> Frontend["Next.js :3000"]
-  Nginx --> Backend["FastAPI :8000"]
-  Frontend -. "HTTP snapshot + live workflow start" .-> Backend
-  Frontend -. "WS execution events + telemetry" .-> Backend
-
-  Backend --> LangGraph["LangGraph Runtime"]
-  LangGraph --> Worker["LangGraph Recovery Worker"]
-  Backend --> EventBus["ExecutionEventBus"]
-  EventBus --> LiveLogs["Live logs / tokens / outputs / QA results"]
-  Backend --> Postgres["PostgreSQL JSONB persistence"]
-  Backend --> Redis["Redis"]
-  Backend --> Qdrant["Qdrant"]
-  Backend --> MinIO["MinIO"]
-  Backend --> Playwright["Playwright Sandbox"]
-  Backend --> Selenium["Selenium Sandbox"]
-
-  Playwright --> Artifacts["QA Artifacts"]
-  Selenium --> Artifacts
-  Artifacts --> MinIO
-```
-
-## Capabilities
-
-- **Orchestration:** LangGraph supervisor, typed graph state, conditional routing, retries, QA rejection loops, workflow metadata.
-- **Agent Runtime:** reusable base runtime, Developer runtime, QA runtime, prompt building, context assembly, output validation, retries, telemetry hooks, and OpenAI token streaming callbacks.
-- **Persistence:** PostgreSQL JSONB adapters for workflow executions, checkpoints, uploads, Prompt Studio, governance config, workspaces, projects, and agent configuration; in-memory adapters remain for focused tests.
-- **Context and Memory:** dynamic context loading, semantic repository file selection, architecture-aware loading, context compression, token budgeting, isolated agent context, short/long-term memory, ADR/bug/execution history memory, semantic indexing, vector-ready retrieval, Qdrant-ready boundary.
-- **Workspace and Project Management:** tenant-aware workspaces, projects, repository bindings, workspace permissions, editable workspace-specific agent config, isolated storage/memory/governance namespaces.
-- **Repository Automation:** isolated Git workspaces, clone/branch/diff/commit/PR preparation, repository scanning, framework detection, dependency graphing, architecture summaries.
-- **Quality and Review:** autonomous QA output contracts, Playwright/Selenium sandbox boundaries, screenshot/log/evidence artifacts, autonomous PR review, structured comments, severity classification, merge readiness scoring.
-- **Governance and Prompts:** global and agent policies, inheritance, conflict-aware merge rules, runtime validation, output rejection, editable governance UI, Prompt Engineering Studio with markdown editing, variables, preview, testing, versioning, comparison, rollback, token estimation, and runtime prompt injection.
-- **Security and Audit:** JWT auth boundary, RBAC roles/permissions, optional security middleware, route dependency helpers, immutable hash-chained audit events, audit APIs.
-- **Observability and Streaming:** execution event bus, event history replay on WebSocket connect, live logs, token chunks, generated output events, QA telemetry, timelines, workflow telemetry, metrics, traces, analytics, Prometheus/OpenTelemetry/Datadog/Grafana-ready outputs.
-- **Dashboard:** Next.js App Router UI backed by `/dashboard/snapshot`, execution and telemetry WebSockets, live workflow graph, agent status, retries, tokens, generated outputs, QA results, approvals, observability, QA reports, docs, PR summaries, Mermaid diagrams, and an empty live-state shell when no backend is configured.
-
-## Real Streaming Components
-
-- `ExecutionEventBus`: in-memory async pub/sub and event history source for workflow-scoped execution events.
-- `ExecutionEventEmitter` and `StructuredExecutionLogger`: emit agent lifecycle, retry, progress, log, token, output, and QA telemetry events.
-- `LangGraphExecutionRuntime`: runs the real BA -> Architect -> Developer -> QA -> Docs -> PR graph and passes token callbacks into agent requests.
-- `OpenAIChatModelClient.stream_complete`: streams model deltas into `token_streamed` events when the real OpenAI client is active.
-- `/workflows/live`: returns a workflow id immediately and executes the real workflow in the background so clients can subscribe before completion.
-- `/ws/executions/{workflow_id}`: replays real event history, then streams new execution events live.
-- `/ws/workflows/{workflow_id}/telemetry`: streams live workflow graph snapshots after every workflow event.
-- `/dashboard/snapshot`: builds the dashboard state from the latest real workflow, event history, generated artifacts, QA telemetry, logs, retries, and token counters.
-- `useExecutionStream` and `useWorkflowTelemetry`: consume websocket data only; they no longer synthesize replayed or timer-driven execution movement.
-
-## Runtime Configuration
-
-Runtime configuration is editable without restarting the backend when PostgreSQL is configured:
-
-- Active Prompt Studio documents are loaded into agent prompt context for matching global or agent scope.
-- Governance documents are parsed into runtime rules and merged into the effective policy for matching global or agent scope.
-- Workflow records, checkpoints, uploads, workspaces, projects, prompt versions, and governance versions persist to PostgreSQL JSONB.
-- Rollbacks create new persisted versions and immediately affect the next execution.
-
-## API Areas
-
-- `/auth/*` and `/audit/*`: JWT, access checks, audit events
-- `/workspaces/*`: tenants, workspaces, projects, repository bindings, isolation summary
-- `/workspace/chat/*`: chat conversations, uploads, references, workflow triggering
-- `/workflows/*` and `/executions/*`: workflow lifecycle, immediate live workflow start, status, logs, telemetry
-- `/approvals/*`: gates, decisions, pauses, resumes
-- `/governance/configs/*`: editable governance, versions, rollback
-- `/prompt-studio/prompts/*`: prompt CRUD, preview, testing, versions, compare, rollback
-- `/observability/*`: metrics, traces, analytics, exporters
-- `/reports/*`, `/docs/*`, `/pr/*`: QA reports, generated docs, PR summaries
-- `/dashboard/snapshot`: latest real workflow dashboard snapshot assembled from execution state and event history
-- `/ws/*`: execution, workflow telemetry, chat streams; execution sockets replay history and then stream live events
-
-## Local Development
-
-Backend:
-
-```powershell
-python -m pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Frontend:
-
-```powershell
-cd frontend
-npm.cmd install
-npm.cmd run dev -- --hostname 127.0.0.1 --port 3000
-```
-
-Optional frontend integration:
-
-```text
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
-NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8000
-```
-
-Without those variables, execution views render an empty live-state shell. The old dummy execution visualization and mock event replay have been removed.
-
-## Verification
-
-Backend:
-
-```powershell
-python -m pytest -p no:cacheprovider tests
-```
-
-Frontend:
-
-```powershell
-cd frontend
-npm.cmd run typecheck
-npm.cmd run build
-```
-
-Latest targeted backend verification: `43 passed` for context engineering, runtime foundation, governance, Prompt Studio, workspace management, FastAPI, real workflow runtime, developer runtime, and story ingestion tests.
-
-Additional QA/repository verification: streaming, QA runtime, PR review, and most sandbox tests passed locally; repository Git tests were blocked by Windows file permission/lock errors under generated `outputs/.../.git` folders.
-
-## Deployment Assets
-
-- Root local stack: `docker-compose.yml`
-- Dockerfiles: `deployment/docker/`
-- Nginx: `deployment/nginx/nginx.conf`
-- Env templates: `deployment/env/`
-- Production config: `deployment/config/`
-- Compose docs: `deployment/docs/docker-compose-platform.md`
-- Production guide: `deployment/docs/production-deployment.md`
-- Kubernetes-ready manifests: `deployment/kubernetes/`
-
-## Design Principles
-
-- Never collapse agent responsibilities.
-- Keep prompts modular and agent-specific.
-- Keep orchestration, memory, context, prompts, governance, and execution separate.
-- Keep tenant/workspace boundaries explicit.
-- Keep audit events immutable.
-- Prefer typed contracts and async-first boundaries.
-- Keep local in-memory implementations replaceable by Redis, PostgreSQL, Qdrant, object storage, and enterprise identity providers.
+---
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+Legion Agents is licensed under the [Apache License 2.0](LICENSE).
+
+You are encouraged to fork it, experiment with it, extend it, challenge its architecture, and help shape what AI-native software delivery systems can become.
