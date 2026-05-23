@@ -1,5 +1,6 @@
 """FastAPI adapter for Prompt Engineering Studio."""
 
+from pathlib import Path
 from uuid import UUID
 
 from app.schemas import (
@@ -114,10 +115,51 @@ class PromptStudioApplicationService:
         comparison = await self._service.compare_versions(prompt_id, left_version, right_version)
         return PromptComparisonResponse(comparison=comparison.model_dump(mode="json"))
 
+    async def ensure_seeded(self) -> None:
+        await self._seed_defaults()
+
     async def _seed_defaults(self) -> None:
         if self._seeded:
             return
         self._seeded = True
+        existing = await self._service.list()
+        existing_names = {(prompt.scope.value, prompt.agent_name or "", prompt.name) for prompt in existing}
+        root = Path.cwd()
+        file_seeds: list[PromptUpsert] = []
+        for path in sorted((root / "agents").glob("*/prompts/*.md")):
+            agent_name = path.parts[-3]
+            name = path.stem.replace("-", " ").replace("_", " ").title()
+            file_seeds.append(
+                PromptUpsert(
+                    name=name,
+                    scope=PromptScope.AGENT,
+                    agent_name=agent_name,
+                    markdown=path.read_text(encoding="utf-8"),
+                    variables=tuple(),
+                    status=PromptStatus.ACTIVE,
+                    updated_by="seed",
+                    change_summary="Seed agent prompt from repository.",
+                    metadata={"source_path": str(path.resolve().relative_to(root)), "source_type": "seeded_file"},
+                )
+            )
+        for path in sorted((root / "core" / "contracts").glob("*_prompt.md")):
+            name = path.stem.replace("_", " ").title()
+            file_seeds.append(
+                PromptUpsert(
+                    name=name,
+                    scope=PromptScope.GLOBAL,
+                    markdown=path.read_text(encoding="utf-8"),
+                    variables=tuple(),
+                    status=PromptStatus.ACTIVE,
+                    updated_by="seed",
+                    change_summary="Seed global prompt from repository.",
+                    metadata={"source_path": str(path.resolve().relative_to(root)), "source_type": "seeded_file"},
+                )
+            )
+        for seed in file_seeds:
+            key = (seed.scope.value, seed.agent_name or "", seed.name)
+            if key not in existing_names:
+                await self._service.save(seed)
         if await self._service.list():
             return
         for agent_name, role in (

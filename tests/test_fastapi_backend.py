@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import time
 
 from app.services.execution_service import ExecutionService
 from app.main import create_app
@@ -7,6 +8,10 @@ from tests.test_real_workflow_runtime import WorkflowModelClient
 
 def _client() -> TestClient:
     return TestClient(create_app(execution_service=ExecutionService(model_client=WorkflowModelClient())))
+
+
+def _client_without_provider() -> TestClient:
+    return TestClient(create_app(execution_service=ExecutionService()))
 
 
 def test_healthcheck() -> None:
@@ -266,6 +271,65 @@ def test_workspace_chat_api_uploads_references_and_triggers_workflow() -> None:
     assert events_response.status_code == 200
     event_types = {event["type"] for event in events_response.json()["events"]}
     assert {"attachment_uploaded", "workflow_triggered", "execution_progress"} <= event_types
+
+
+def test_workspace_chat_send_persists_assistant_error_when_no_provider() -> None:
+    client = _client_without_provider()
+    conversation_response = client.post(
+        "/workspace/chat/conversations",
+        json={"title": "No provider chat", "created_by": "tester"},
+    )
+    assert conversation_response.status_code == 201
+    conversation_id = conversation_response.json()["conversation"]["id"]
+
+    message_response = client.post(
+        f"/workspace/chat/conversations/{conversation_id}/messages",
+        json={"content": "Hello, explain this platform", "trigger_workflow": False},
+    )
+    assert message_response.status_code == 201
+
+    deadline = time.time() + 3
+    assistant = None
+    while time.time() < deadline:
+        conversation = client.get(f"/workspace/chat/conversations/{conversation_id}").json()["conversation"]
+        if len(conversation["messages"]) >= 2 and conversation["messages"][-1]["role"] == "assistant":
+            assistant = conversation["messages"][-1]
+            if assistant.get("status") in {"failed", "completed"}:
+                break
+        time.sleep(0.1)
+    assert assistant is not None
+    assert assistant["status"] == "failed"
+    assert "Provider error:" in assistant["error"]
+
+
+def test_workspace_chat_delete_conversation() -> None:
+    client = _client()
+    conversation_response = client.post(
+        "/workspace/chat/conversations",
+        json={"title": "Delete me", "created_by": "tester"},
+    )
+    conversation_id = conversation_response.json()["conversation"]["id"]
+    deleted = client.delete(f"/workspace/chat/conversations/{conversation_id}")
+    assert deleted.status_code == 204
+    listed = client.get("/workspace/chat/conversations").json()["conversations"]
+    assert all(item["id"] != conversation_id for item in listed)
+
+
+def test_workspace_chat_send_returns_immediately_with_pending_assistant() -> None:
+    client = _client()
+    conversation_id = client.post(
+        "/workspace/chat/conversations",
+        json={"title": "Async chat", "created_by": "tester"},
+    ).json()["conversation"]["id"]
+    response = client.post(
+        f"/workspace/chat/conversations/{conversation_id}/messages",
+        json={"content": "Hello async chat", "trigger_workflow": False},
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["job_id"] is not None
+    assert payload["assistant_message"] is not None
+    assert payload["assistant_message"]["status"] in {"pending", "streaming", "completed"}
 
 
 def test_governance_seed_loads_repository_markdown_documents() -> None:

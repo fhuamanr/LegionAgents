@@ -2,6 +2,9 @@
 
 from pathlib import Path
 from uuid import UUID
+import logging
+import asyncio
+from uuid import uuid4
 
 from app.schemas import (
     ChatAttachmentResponse,
@@ -21,6 +24,8 @@ from core.contracts.chat import (
     ChatMessageRequest,
     WorkspaceAttachment,
     WorkspaceAttachmentKind,
+    ChatMessage,
+    ChatMessageStatus,
 )
 from core.streaming import ExecutionEvent
 
@@ -37,6 +42,9 @@ class WorkspaceChatApplicationService:
         self._execution_service = execution_service
         self._chat = chat_service or WorkspaceChatService()
         self._intent_parser = intent_parser or ChatWorkflowIntentParser()
+        self._logger = logging.getLogger(__name__)
+        self._jobs: dict[str, asyncio.Task] = {}
+        self._job_message_map: dict[str, tuple[UUID, UUID]] = {}
 
     @property
     def event_bus(self):
@@ -44,6 +52,7 @@ class WorkspaceChatApplicationService:
 
     async def create_conversation(self, request: ChatConversationCreateRequest) -> ChatConversationResponse:
         conversation = await self._chat.create_conversation(title=request.title, created_by=request.created_by)
+        self._logger.info("workspace conversation created: id=%s title=%s", conversation.id, conversation.title)
         return ChatConversationResponse(conversation=conversation.model_dump(mode="json"))
 
     async def list_conversations(self) -> ChatConversationListResponse:
@@ -53,6 +62,10 @@ class WorkspaceChatApplicationService:
     async def get_conversation(self, conversation_id: UUID) -> ChatConversationResponse:
         conversation = await self._chat.get_conversation(conversation_id)
         return ChatConversationResponse(conversation=conversation.model_dump(mode="json"))
+
+    async def delete_conversation(self, conversation_id: UUID) -> None:
+        self._logger.info("workspace conversation deleted: id=%s", conversation_id)
+        await self._chat.delete_conversation(conversation_id)
 
     async def upload_attachment(
         self,
@@ -80,11 +93,28 @@ class WorkspaceChatApplicationService:
     ) -> ChatMessageResponse:
         workflow = None
         workflow_id = None
+        assistant_message: ChatMessage | None = None
+        job_id: str | None = None
         conversation = await self._chat.get_conversation(conversation_id)
         attachments = self._select_attachments(conversation.attachments, request.attachment_ids)
         intent = await self._intent_parser.parse(request.content, attachments)
         should_resume = request.resume_workflow or intent.resume_requested
         should_trigger = request.trigger_workflow or intent.should_trigger_workflow
+
+        user_message = await self._chat.add_message(
+            conversation_id,
+            ChatMessageRequest(
+                content=request.content,
+                attachment_ids=request.attachment_ids,
+                trigger_workflow=should_trigger,
+                resume_workflow=should_resume,
+                metadata={
+                    **request.metadata,
+                    "intent": intent.model_dump(mode="json"),
+                },
+            ),
+            workflow_id=workflow_id,
+        )
 
         if should_resume:
             workflow_id = self._workflow_id_for_resume(request.metadata, conversation.messages)
@@ -126,22 +156,29 @@ class WorkspaceChatApplicationService:
                 conversation_id,
                 {"workflow_id": str(workflow_response.workflow_id), "status": workflow_response.status.value},
             )
-
-        message = await self._chat.add_message(
-            conversation_id,
-            ChatMessageRequest(
-                content=request.content,
-                attachment_ids=request.attachment_ids,
-                trigger_workflow=should_trigger,
-                resume_workflow=should_resume,
+        else:
+            job_id = str(uuid4())
+            assistant_message = await self._chat.add_assistant_message(
+                conversation_id,
+                "Generating response...",
+                workflow_id=workflow_id,
+                status=ChatMessageStatus.PENDING,
                 metadata={
-                    **request.metadata,
-                    "intent": intent.model_dump(mode="json"),
-                    "workflow_id": str(workflow_id) if workflow_id else None,
+                    "job_id": job_id,
+                    "source_user_message_id": str(user_message.id),
+                    "provider_async": True,
                 },
-            ),
-            workflow_id=workflow_id,
-        )
+            )
+            task = asyncio.create_task(
+                self._run_assistant_job(
+                    job_id=job_id,
+                    conversation_id=conversation_id,
+                    assistant_message=assistant_message,
+                    prompt=request.content,
+                )
+            )
+            self._jobs[job_id] = task
+            self._job_message_map[job_id] = (conversation_id, assistant_message.id)
         if should_trigger or should_resume:
             await self._chat.add_assistant_message(
                 conversation_id,
@@ -149,14 +186,59 @@ class WorkspaceChatApplicationService:
                 workflow_id=workflow_id,
             )
         return ChatMessageResponse(
-            message=message.model_dump(mode="json"),
+            message=user_message.model_dump(mode="json"),
+            assistant_message=assistant_message.model_dump(mode="json") if assistant_message else None,
             workflow=workflow,
             intent=intent.model_dump(mode="json"),
+            job_id=job_id,
+            status="running" if job_id else "completed",
         )
 
     async def events(self, conversation_id: UUID) -> ChatEventListResponse:
         events = await self._chat.event_bus.history(conversation_id)
         return ChatEventListResponse(events=tuple(event.model_dump(mode="json") for event in events))
+
+    async def message(self, conversation_id: UUID, message_id: UUID) -> dict:
+        conversation = await self._chat.get_conversation(conversation_id)
+        message = next(item for item in conversation.messages if item.id == message_id)
+        return message.model_dump(mode="json")
+
+    async def retry_message(self, conversation_id: UUID, message_id: UUID) -> dict:
+        conversation = await self._chat.get_conversation(conversation_id)
+        failed = next(item for item in conversation.messages if item.id == message_id)
+        source_user_id = failed.metadata.get("source_user_message_id")
+        source_user = next((item for item in conversation.messages if str(item.id) == str(source_user_id)), None)
+        if source_user is None:
+            raise ValueError("Source user message not found for retry.")
+        job_id = str(uuid4())
+        assistant = await self._chat.add_assistant_message(
+            conversation_id,
+            "Generating response...",
+            status=ChatMessageStatus.PENDING,
+            metadata={"job_id": job_id, "source_user_message_id": str(source_user.id), "provider_async": True},
+        )
+        task = asyncio.create_task(
+            self._run_assistant_job(
+                job_id=job_id,
+                conversation_id=conversation_id,
+                assistant_message=assistant,
+                prompt=source_user.content,
+            )
+        )
+        self._jobs[job_id] = task
+        self._job_message_map[job_id] = (conversation_id, assistant.id)
+        return assistant.model_dump(mode="json")
+
+    async def cancel_message(self, conversation_id: UUID, message_id: UUID) -> dict:
+        conversation = await self._chat.get_conversation(conversation_id)
+        message = next(item for item in conversation.messages if item.id == message_id)
+        job_id = str(message.metadata.get("job_id") or "")
+        task = self._jobs.get(job_id)
+        if task and not task.done():
+            task.cancel()
+        cancelled = message.model_copy(update={"status": ChatMessageStatus.CANCELLED, "error": "Generation cancelled."})
+        await self._chat.update_message(conversation_id, cancelled)
+        return cancelled.model_dump(mode="json")
 
     def _select_attachments(
         self,
@@ -203,3 +285,35 @@ class WorkspaceChatApplicationService:
         if workflow_id is None:
             return "I parsed the instruction, but no executable workflow was started."
         return "Workflow triggered. Live execution updates are streaming in this conversation."
+
+    async def _run_assistant_job(
+        self,
+        *,
+        job_id: str,
+        conversation_id: UUID,
+        assistant_message: ChatMessage,
+        prompt: str,
+    ) -> None:
+        streaming = assistant_message.model_copy(update={"status": ChatMessageStatus.STREAMING})
+        await self._chat.update_message(conversation_id, streaming)
+        try:
+            response = await self._execution_service.complete_chat(prompt)
+            completed = streaming.model_copy(
+                update={"content": response, "status": ChatMessageStatus.COMPLETED, "error": None}
+            )
+            await self._chat.update_message(conversation_id, completed)
+        except asyncio.CancelledError:
+            cancelled = streaming.model_copy(
+                update={"status": ChatMessageStatus.CANCELLED, "error": "Generation cancelled."}
+            )
+            await self._chat.update_message(conversation_id, cancelled)
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self._logger.exception("async chat generation failed: job_id=%s", job_id)
+            failed = streaming.model_copy(
+                update={"content": "", "status": ChatMessageStatus.FAILED, "error": f"Provider error: {exc}"}
+            )
+            await self._chat.update_message(conversation_id, failed)
+        finally:
+            self._jobs.pop(job_id, None)
+            self._job_message_map.pop(job_id, None)

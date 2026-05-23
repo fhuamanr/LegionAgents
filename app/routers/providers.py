@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies.container import get_provider_service
-from app.schemas import ProviderHealthResponse, ProviderListResponse, ProviderResponse, ProviderUpsertApiRequest
+from app.schemas import ProviderConnectivityApiRequest, ProviderConnectivityResponse, ProviderHealthResponse, ProviderListResponse, ProviderResponse, ProviderUpsertApiRequest
 from app.services.provider_service import ProviderApplicationService
 
 router = APIRouter(prefix="/providers", tags=["providers"])
@@ -65,6 +65,17 @@ async def check_provider_health(
     service: ProviderApplicationService = Depends(get_provider_service),
 ) -> ProviderHealthResponse:
     return await service.health(provider_id)
+
+
+@router.post("/test-connection", response_model=ProviderConnectivityResponse)
+async def test_provider_connection(
+    request: ProviderConnectivityApiRequest,
+    service: ProviderApplicationService = Depends(get_provider_service),
+) -> ProviderConnectivityResponse:
+    try:
+        return await service.test_connection(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/{provider_id}", status_code=204)

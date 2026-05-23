@@ -2,7 +2,7 @@
 
 from core.chat.events import ChatEventBus
 from core.chat.intent import ChatWorkflowIntentParser
-from core.chat.repository import ChatConversationRepository, FileChatConversationRepository, InMemoryChatConversationRepository
+from core.chat.repository import ChatConversationRepository, FileChatConversationRepository, InMemoryChatConversationRepository, PostgresChatConversationRepository
 from core.chat.service import WorkspaceChatService
 
 __all__ = [
@@ -11,5 +11,6 @@ __all__ = [
     "ChatWorkflowIntentParser",
     "FileChatConversationRepository",
     "InMemoryChatConversationRepository",
+    "PostgresChatConversationRepository",
     "WorkspaceChatService",
 ]

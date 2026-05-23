@@ -42,6 +42,16 @@ class ChatEventType(StrEnum):
     ERROR = "error"
 
 
+class ChatMessageStatus(StrEnum):
+    """Workspace chat message processing status."""
+
+    PENDING = "pending"
+    STREAMING = "streaming"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class ChatWorkflowType(StrEnum):
     """Workflow families that can be initiated from chat instructions."""
 
@@ -89,6 +99,8 @@ class ChatMessage(ContractBaseModel):
     content: str = ""
     attachment_ids: tuple[UUID, ...] = Field(default_factory=tuple)
     workflow_id: UUID | None = None
+    status: ChatMessageStatus = ChatMessageStatus.COMPLETED
+    error: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 

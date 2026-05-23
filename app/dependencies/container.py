@@ -17,6 +17,7 @@ from core.graph import PostgresWorkflowExecutionRepository
 from core.governance_management import GovernanceManagementService, PostgresGovernanceConfigRepository
 from core.persistence import PostgresJsonDocumentStore
 from core.prompt_studio import PostgresPromptRepository, PromptStudioService
+from core.chat import PostgresChatConversationRepository, WorkspaceChatService
 from core.workspaces import PostgresWorkspaceRepository, WorkspaceManagementService
 
 
@@ -45,6 +46,11 @@ class AppContainer:
             if postgres_store is not None
             else None
         )
+        chat_repository = (
+            PostgresChatConversationRepository(postgres_store)
+            if postgres_store is not None
+            else None
+        )
         self.provider_registry = ProviderRegistry(postgres_store)
         self.provider_service = ProviderApplicationService(self.provider_registry)
         self.execution_service = ExecutionService(
@@ -59,7 +65,10 @@ class AppContainer:
             if governance_repository is not None
             else None
         )
-        self.chat_service = WorkspaceChatApplicationService(self.execution_service)
+        self.chat_service = WorkspaceChatApplicationService(
+            self.execution_service,
+            chat_service=WorkspaceChatService(repository=chat_repository) if chat_repository is not None else None,
+        )
         self.prompt_studio_service = PromptStudioApplicationService(
             PromptStudioService(repository=prompt_repository)
             if prompt_repository is not None

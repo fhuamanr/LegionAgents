@@ -13,17 +13,26 @@ import type {
 } from "./types";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+const internalApiBaseUrl = process.env.INTERNAL_API_BASE_URL;
+
+function resolvedApiBaseUrl(): string | undefined {
+  if (typeof window === "undefined" && internalApiBaseUrl) {
+    return internalApiBaseUrl;
+  }
+  return apiBaseUrl;
+}
 
 async function requestJson<T>(path: string): Promise<T> {
-  if (!apiBaseUrl) {
+  const baseUrl = resolvedApiBaseUrl();
+  if (!baseUrl) {
     throw new Error("NEXT_PUBLIC_API_BASE_URL is not configured.");
   }
 
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetch(`${baseUrl}${path}`, {
     headers: {
       Accept: "application/json",
     },
-    next: { revalidate: 10 },
+    cache: "no-store",
   });
 
   if (!response.ok) {
@@ -34,7 +43,7 @@ async function requestJson<T>(path: string): Promise<T> {
 }
 
 export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
-  if (!apiBaseUrl) {
+  if (!resolvedApiBaseUrl()) {
     return emptyDashboardSnapshot();
   }
 
@@ -46,7 +55,7 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
 }
 
 export async function getWorkflowTelemetry(workflowId: string): Promise<WorkflowTelemetrySnapshot> {
-  if (!apiBaseUrl) {
+  if (!resolvedApiBaseUrl()) {
     return emptyDashboardSnapshot().visualization;
   }
 
@@ -61,62 +70,53 @@ export async function getProviderManagementSnapshot(): Promise<{
   providers: readonly LlmProviderSummary[];
   checks: readonly LlmProviderHealthCheck[];
 }> {
-  if (!apiBaseUrl) {
+  if (!resolvedApiBaseUrl()) {
     return { providers: [], checks: [] };
   }
 
+  const providersResponse = await requestJson<{ providers: readonly Record<string, unknown>[] }>("/providers");
+  let healthResponse: { checks: readonly Record<string, unknown>[] } = { checks: [] };
   try {
-    const [providersResponse, healthResponse] = await Promise.all([
-      requestJson<{ providers: readonly Record<string, unknown>[] }>("/providers"),
-      requestJson<{ checks: readonly Record<string, unknown>[] }>("/providers/health"),
-    ]);
-    return {
-      providers: providersResponse.providers.map(normalizeProvider),
-      checks: healthResponse.checks.map(normalizeProviderHealth),
-    };
+    healthResponse = await requestJson<{ checks: readonly Record<string, unknown>[] }>("/providers/health");
   } catch {
-    return { providers: [], checks: [] };
+    healthResponse = { checks: [] };
   }
+  return {
+    providers: providersResponse.providers.map(normalizeProvider),
+    checks: healthResponse.checks.map(normalizeProviderHealth),
+  };
 }
 
 export async function getWorkspaceChatSnapshot(): Promise<readonly WorkspaceConversationSummary[]> {
-  if (!apiBaseUrl) {
+  if (!resolvedApiBaseUrl()) {
     return [];
   }
-  try {
-    const response = await requestJson<{ conversations: readonly Record<string, unknown>[] }>("/workspace/chat/conversations");
-    return response.conversations.map(normalizeConversation);
-  } catch {
-    return [];
-  }
+  const response = await requestJson<{ conversations: readonly Record<string, unknown>[] }>("/workspace/chat/conversations");
+  return response.conversations.map(normalizeConversation);
 }
 
 export async function getGovernanceManagementSnapshot(): Promise<{
   documents: readonly GovernanceConfigDocument[];
   versions: readonly GovernanceConfigVersion[];
 }> {
-  if (!apiBaseUrl) {
+  if (!resolvedApiBaseUrl()) {
     return { documents: [], versions: [] };
   }
-  try {
-    const response = await requestJson<{ documents: readonly Record<string, unknown>[] }>("/governance/configs");
-    const documents = response.documents.map(normalizeGovernanceDocument);
-    const versions = (
-      await Promise.all(
-        documents.map(async (document) => {
-          try {
-            const versionResponse = await requestJson<{ versions: readonly Record<string, unknown>[] }>(`/governance/configs/${document.id}/versions`);
-            return versionResponse.versions.map(normalizeGovernanceVersion);
-          } catch {
-            return [];
-          }
-        }),
-      )
-    ).flat();
-    return { documents, versions };
-  } catch {
-    return { documents: [], versions: [] };
-  }
+  const response = await requestJson<{ documents: readonly Record<string, unknown>[] }>("/governance/configs");
+  const documents = response.documents.map(normalizeGovernanceDocument);
+  const versions = (
+    await Promise.all(
+      documents.map(async (document) => {
+        try {
+          const versionResponse = await requestJson<{ versions: readonly Record<string, unknown>[] }>(`/governance/configs/${document.id}/versions`);
+          return versionResponse.versions.map(normalizeGovernanceVersion);
+        } catch {
+          return [];
+        }
+      }),
+    )
+  ).flat();
+  return { documents, versions };
 }
 
 export async function getPromptStudioSnapshot(): Promise<{
@@ -124,28 +124,24 @@ export async function getPromptStudioSnapshot(): Promise<{
   versions: readonly PromptVersion[];
   testResult: PromptTestSummary;
 }> {
-  if (!apiBaseUrl) {
+  if (!resolvedApiBaseUrl()) {
     return { prompts: [], versions: [], testResult: emptyDashboardSnapshot().promptStudio.testResult };
   }
-  try {
-    const response = await requestJson<{ prompts: readonly Record<string, unknown>[] }>("/prompt-studio/prompts");
-    const prompts = response.prompts.map(normalizePromptDocument);
-    const versions = (
-      await Promise.all(
-        prompts.map(async (prompt) => {
-          try {
-            const versionResponse = await requestJson<{ versions: readonly Record<string, unknown>[] }>(`/prompt-studio/prompts/${prompt.id}/versions`);
-            return versionResponse.versions.map(normalizePromptVersion);
-          } catch {
-            return [];
-          }
-        }),
-      )
-    ).flat();
-    return { prompts, versions, testResult: emptyDashboardSnapshot().promptStudio.testResult };
-  } catch {
-    return { prompts: [], versions: [], testResult: emptyDashboardSnapshot().promptStudio.testResult };
-  }
+  const response = await requestJson<{ prompts: readonly Record<string, unknown>[] }>("/prompt-studio/prompts");
+  const prompts = response.prompts.map(normalizePromptDocument);
+  const versions = (
+    await Promise.all(
+      prompts.map(async (prompt) => {
+        try {
+          const versionResponse = await requestJson<{ versions: readonly Record<string, unknown>[] }>(`/prompt-studio/prompts/${prompt.id}/versions`);
+          return versionResponse.versions.map(normalizePromptVersion);
+        } catch {
+          return [];
+        }
+      }),
+    )
+  ).flat();
+  return { prompts, versions, testResult: emptyDashboardSnapshot().promptStudio.testResult };
 }
 
 function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {
@@ -159,6 +155,7 @@ function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {
     status: String(item.status) as LlmProviderSummary["status"],
     agentModels: (item.agent_models ?? {}) as Record<string, string>,
     configured: Boolean(item.configured),
+    isDefault: Boolean(item.is_default ?? false),
     updatedAt: String(item.updated_at ?? ""),
   };
 }
@@ -183,6 +180,8 @@ function normalizeConversation(item: Record<string, unknown>): WorkspaceConversa
       id: String(message.id),
       role: String(message.role) as WorkspaceConversationSummary["messages"][number]["role"],
       content: String(message.content ?? ""),
+      status: message.status ? String(message.status) as WorkspaceConversationSummary["messages"][number]["status"] : undefined,
+      error: message.error ? String(message.error) : undefined,
       attachmentIds: Array.isArray(message.attachment_ids) ? message.attachment_ids.map(String) : [],
       workflowId: message.workflow_id ? String(message.workflow_id) : undefined,
       createdAt: String(message.created_at ?? ""),

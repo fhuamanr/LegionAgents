@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.dependencies.container import get_chat_service
 from app.schemas import (
@@ -43,6 +43,15 @@ async def get_conversation(
     return await service.get_conversation(conversation_id)
 
 
+@router.delete("/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(
+    conversation_id: UUID,
+    service: WorkspaceChatApplicationService = Depends(get_chat_service),
+) -> Response:
+    await service.delete_conversation(conversation_id)
+    return Response(status_code=204)
+
+
 @router.post("/conversations/{conversation_id}/attachments", response_model=ChatAttachmentResponse, status_code=201)
 async def upload_attachment(
     conversation_id: UUID,
@@ -67,3 +76,33 @@ async def get_chat_events(
     service: WorkspaceChatApplicationService = Depends(get_chat_service),
 ) -> ChatEventListResponse:
     return await service.events(conversation_id)
+
+
+@router.get("/conversations/{conversation_id}/messages/{message_id}")
+async def get_chat_message(
+    conversation_id: UUID,
+    message_id: UUID,
+    service: WorkspaceChatApplicationService = Depends(get_chat_service),
+) -> dict:
+    return await service.message(conversation_id, message_id)
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/retry")
+async def retry_chat_message(
+    conversation_id: UUID,
+    message_id: UUID,
+    service: WorkspaceChatApplicationService = Depends(get_chat_service),
+) -> dict:
+    try:
+        return await service.retry_message(conversation_id, message_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/cancel")
+async def cancel_chat_message(
+    conversation_id: UUID,
+    message_id: UUID,
+    service: WorkspaceChatApplicationService = Depends(get_chat_service),
+) -> dict:
+    return await service.cancel_message(conversation_id, message_id)

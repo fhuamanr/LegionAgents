@@ -38,8 +38,9 @@ class ProviderUpsertApiRequest(ApiModel):
     default_model: str = Field(min_length=1)
     status: str = Field(default="active", min_length=1)
     agent_models: dict[str, str] = Field(default_factory=dict)
-    timeout_seconds: float | None = 60
+    timeout_seconds: float | None = 240
     headers: dict[str, str] = Field(default_factory=dict)
+    is_default: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -53,6 +54,20 @@ class ProviderListResponse(ApiModel):
 
 class ProviderHealthResponse(ApiModel):
     checks: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class ProviderConnectivityApiRequest(ApiModel):
+    name: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    base_url: str | None = None
+    api_key: str | None = None
+    default_model: str = Field(min_length=1)
+    timeout_seconds: float | None = 60
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class ProviderConnectivityResponse(ApiModel):
+    result: dict[str, Any]
 
 
 class UserStoryUploadRequest(ApiModel):
@@ -313,8 +328,11 @@ class ChatAttachmentResponse(ApiModel):
 
 class ChatMessageResponse(ApiModel):
     message: dict[str, Any]
+    assistant_message: dict[str, Any] | None = None
     workflow: dict[str, Any] | None = None
     intent: dict[str, Any] | None = None
+    job_id: str | None = None
+    status: str | None = None
 
 
 class ChatEventListResponse(ApiModel):

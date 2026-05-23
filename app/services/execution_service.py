@@ -24,6 +24,7 @@ from app.schemas import (
     WorkflowStatus,
 )
 from core.agents.runtime import AgentModelClient
+from core.contracts.prompts import PromptMessage, PromptRole
 from core.ingestion import StoryIngestionPipeline
 from core.streaming import (
     ExecutionEvent,
@@ -342,6 +343,16 @@ class ExecutionService:
                 "events": list(logs.events),
                 "latest_state": latest_state,
             },
+        )
+
+    async def complete_chat(self, content: str) -> str:
+        if self._model_client is None:
+            raise ValueError("No provider is configured.")
+        return await self._model_client.complete(
+            (
+                PromptMessage(role=PromptRole.SYSTEM, content="You are the AI Workspace assistant for Legion Agents."),
+                PromptMessage(role=PromptRole.USER, content=content),
+            )
         )
 
     def _runtime_event_hook(

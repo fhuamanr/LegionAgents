@@ -13,6 +13,7 @@ from core.contracts.chat import (
     ChatMessage,
     ChatMessageRequest,
     ChatRole,
+    ChatMessageStatus,
     WorkspaceAttachment,
     WorkspaceAttachmentKind,
 )
@@ -56,6 +57,19 @@ class WorkspaceChatService:
         """Get one conversation."""
 
         return await self.repository.get(conversation_id)
+
+    async def delete_conversation(self, conversation_id: UUID) -> None:
+        """Delete one conversation."""
+
+        await self.repository.delete(conversation_id)
+        await self.event_bus.publish(
+            ChatEvent(
+                conversation_id=conversation_id,
+                type=ChatEventType.MESSAGE_CREATED,
+                message="Conversation deleted.",
+                payload={"deleted": True},
+            )
+        )
 
     async def upload_attachment(
         self,
@@ -124,6 +138,9 @@ class WorkspaceChatService:
         conversation_id: UUID,
         content: str,
         workflow_id: UUID | None = None,
+        status: ChatMessageStatus = ChatMessageStatus.COMPLETED,
+        metadata: dict | None = None,
+        error: str | None = None,
     ) -> ChatMessage:
         """Add an assistant chat message."""
 
@@ -132,6 +149,9 @@ class WorkspaceChatService:
             role=ChatRole.ASSISTANT,
             content=content,
             workflow_id=workflow_id,
+            status=status,
+            metadata=metadata or {},
+            error=error,
         )
         await self.repository.add_message(conversation_id, message)
         await self.event_bus.publish(
@@ -139,6 +159,20 @@ class WorkspaceChatService:
                 conversation_id=conversation_id,
                 type=ChatEventType.MESSAGE_CREATED,
                 message="Assistant message created.",
+                payload=message.model_dump(mode="json"),
+            )
+        )
+        return message
+
+    async def update_message(self, conversation_id: UUID, message: ChatMessage) -> ChatMessage:
+        """Persist message status/content updates."""
+
+        await self.repository.update_message(conversation_id, message)
+        await self.event_bus.publish(
+            ChatEvent(
+                conversation_id=conversation_id,
+                type=ChatEventType.EXECUTION_PROGRESS,
+                message="Message updated.",
                 payload=message.model_dump(mode="json"),
             )
         )

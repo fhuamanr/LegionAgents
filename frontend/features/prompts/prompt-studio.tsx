@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FlaskConical, GitCompareArrows, History, RotateCcw, Save } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,8 @@ export function PromptStudio({
   const [selectedId, setSelectedId] = useState(prompts[0]?.id ?? "");
   const [notice, setNotice] = useState<string | null>(prompts.length ? null : "No prompts found yet. Use New Prompt to create an editable runtime prompt.");
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [scopeFilter, setScopeFilter] = useState("all");
   const selected = items.find((prompt) => prompt.id === selectedId) ?? items[0];
   const [draft, setDraft] = useState(selected?.markdown ?? "");
   const [testInput, setTestInput] = useState("Generate a repository-aware implementation plan.");
@@ -32,6 +34,17 @@ export function PromptStudio({
   );
   const rendered = useMemo(() => renderPrompt(draft, selected?.variables ?? []), [draft, selected?.variables]);
   const estimatedTokens = Math.max(1, Math.round(rendered.length / 4));
+  useEffect(() => {
+    setDraft(selected?.markdown ?? "");
+  }, [selectedId, selected?.markdown]);
+  const filtered = useMemo(
+    () => items.filter((prompt) => {
+      const matchesQuery = `${prompt.name} ${prompt.agentName ?? ""}`.toLowerCase().includes(query.toLowerCase());
+      const matchesScope = scopeFilter === "all" || prompt.scope === scopeFilter;
+      return matchesQuery && matchesScope;
+    }),
+    [items, query, scopeFilter],
+  );
 
   function selectPrompt(prompt: PromptDocument): void {
     setSelectedId(prompt.id);
@@ -46,11 +59,20 @@ export function PromptStudio({
           <CardDescription>Agent prompts with versioned markdown templates</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
+          <div className="grid gap-2">
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search prompts" className="h-9 rounded-md border bg-background px-3 text-sm" />
+            <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
+              <option value="all">all scopes</option>
+              <option value="global">global</option>
+              <option value="agent">agent</option>
+              <option value="workflow">workflow</option>
+            </select>
+          </div>
           <Button variant="outline" className="w-full justify-start" disabled={busy} onClick={() => newPrompt()}>
             <Save className="h-4 w-4" aria-hidden="true" />
             New Prompt
           </Button>
-          {items.map((prompt) => (
+          {filtered.map((prompt) => (
             <button
               key={prompt.id}
               type="button"

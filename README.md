@@ -983,3 +983,16 @@ Legion Agents is still evolving, and that is the point. It is a serious engineer
 Legion Agents is licensed under the [Apache License 2.0](LICENSE).
 
 You are encouraged to fork it, experiment with it, extend it, challenge its architecture, and help shape what AI-native software delivery systems can become.
+### Frontend Healthcheck Notes
+
+- Frontend container health is validated via `http://127.0.0.1:3000/api/health`.
+- The dashboard route (`/dashboard`) is not used for container health because it depends on runtime data fetches.
+- Server-side frontend API calls use `INTERNAL_API_BASE_URL` (Compose default: `http://backend:8000`) to avoid container-local `127.0.0.1` routing issues.
+
+Troubleshooting commands:
+
+```bash
+docker compose --env-file .env.compose ps
+docker compose --env-file .env.compose logs frontend --tail=200
+docker inspect ai-delivery-platform-frontend-1 --format='{{json .State.Health}}'
+```

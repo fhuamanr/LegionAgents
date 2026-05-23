@@ -340,6 +340,7 @@ export interface LlmProviderSummary {
   readonly status: LlmProviderStatus;
   readonly agentModels: Record<string, string>;
   readonly configured: boolean;
+  readonly isDefault?: boolean;
   readonly updatedAt: string;
 }
 
@@ -374,6 +375,8 @@ export interface WorkspaceChatMessage {
   readonly id: string;
   readonly role: ChatRole;
   readonly content: string;
+  readonly status?: "pending" | "streaming" | "completed" | "failed" | "cancelled";
+  readonly error?: string;
   readonly attachmentIds: readonly string[];
   readonly workflowId?: string;
   readonly createdAt: string;
