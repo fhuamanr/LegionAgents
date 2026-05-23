@@ -4,6 +4,39 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 
 ## Unreleased
 
+### Current Operational Status
+
+- Converted platform persistence from local-only defaults to PostgreSQL-backed production adapters for workflow executions/checkpoints, API workflow/upload state, Prompt Studio documents and versions, governance documents and versions, workspaces, projects, and workspace agent configuration.
+- Added a shared PostgreSQL JSONB document store adapter used by production repositories while preserving in-memory implementations for focused tests.
+- Replaced the Docker Compose LangGraph worker placeholder with a real `core.graph.worker` process that recovers persisted running workflow executions.
+- Wired active Prompt Studio documents into runtime agent context so prompt edits can affect subsequent executions without restarting.
+- Wired runtime-edited governance documents into the effective policy so global and agent rule edits participate in inheritance, prompt generation, runtime validation, output validation, and execution rejection.
+- Added file upload ingestion for markdown, txt, DOCX, and PDF inputs through the backend upload API.
+- Updated root Mermaid architecture to reflect real PostgreSQL persistence, runtime prompt/governance reload behavior, and the real LangGraph worker.
+- Added Apache License 2.0 project licensing.
+
+### Currently Working
+
+- Real `BA -> Architect -> Developer -> QA -> Docs -> PR` workflow execution through LangGraph.
+- Real OpenAI model execution with structured outputs, retries, token streaming, and generated output events.
+- Real repository modification path for cloning, branching, applying generated changes, diffing, committing, and preparing PR artifacts.
+- Real QA runtime contracts, sandbox boundaries, logs, screenshots, and evidence artifacts when local sandbox services are available.
+- Real live workflow visualization from backend snapshots and WebSocket event streams.
+- Real context engineering with dynamic loading, token budgeting, repository summarization, semantic file selection, architecture-aware prioritization, and agent isolation.
+- Real governance enforcement that injects policy into prompts and rejects invalid outputs at execution time.
+- Real Prompt Studio and governance versioning with rollback.
+
+### Backlog
+
+- Move execution event history from the in-process event bus to Redis Streams or persisted PostgreSQL event replay for multi-process streaming durability.
+- Implement hosted GitHub/GitLab PR creation; current repository runtime prepares local PR artifacts and metadata.
+- Implement Jira and Notion ingestion adapters.
+- Publish all downloadable artifacts through MinIO/object storage.
+- Connect JWT/RBAC to an external identity provider for production SSO.
+- Complete Qdrant-backed semantic retrieval as the default memory backend.
+- Expand frontend editing coverage for every workflow/runtime execution setting.
+- Add Docker Compose smoke tests that exercise PostgreSQL, worker recovery, and sandbox services in CI.
+
 ### Platform Foundation
 
 - Added typed Pydantic contracts for agents, artifacts, context, execution, memory, prompts, outputs, workflow state, ingestion, repository operations, QA sandboxing, approvals, observability, deployment, workspaces, prompt studio, PR review, and security/audit.

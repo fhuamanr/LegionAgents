@@ -45,6 +45,7 @@ class RuleSource(StrEnum):
     GLOBAL_DEFAULT = "global_default"
     ENTERPRISE_STANDARD = "enterprise_standard"
     AGENT_LOCAL = "agent_local"
+    RUNTIME_EDITED = "runtime_edited"
     FUTURE_YAML = "future_yaml"
 
 

@@ -1,6 +1,6 @@
-# Enterprise Multi-Agent Software Delivery Platform
+# Legion Agents - AI Software Delivery Platform
 
-Python 3.12+/LangGraph foundation for an enterprise software delivery control plane. The platform coordinates specialized agents, repository automation, QA evidence, governance, approvals, prompt operations, security, audit, and a Next.js dashboard.
+Python 3.12+/LangGraph platform for chat-driven AI software delivery. The system coordinates specialized agents, repository automation, QA evidence, governance enforcement, dynamic prompt operations, audit, live streaming, and a Next.js dashboard.
 
 Specialized agents remain isolated:
 
@@ -13,7 +13,7 @@ Specialized agents remain isolated:
 
 ## Quick Start
 
-Docker Compose is the canonical local runtime. It starts the frontend, FastAPI backend, LangGraph worker placeholder, PostgreSQL, Redis, Qdrant, MinIO, Playwright sandbox, Selenium sandbox, and Nginx reverse proxy.
+Docker Compose is the canonical local runtime. It starts the frontend, FastAPI backend, real LangGraph recovery worker, PostgreSQL, Redis, Qdrant, MinIO, Playwright sandbox, Selenium sandbox, and Nginx reverse proxy.
 
 ```powershell
 copy deployment\env\.env.compose.example .env.compose
@@ -31,12 +31,48 @@ MinIO console:   http://127.0.0.1:9001
 Selenium grid:   http://127.0.0.1:4444
 ```
 
+Required for real LLM execution:
+
+```powershell
+setx OPENAI_API_KEY "your-api-key"
+```
+
 Stop or reset:
 
 ```powershell
 docker compose --env-file .env.compose down
 docker compose --env-file .env.compose down --volumes
 ```
+
+## Current Status
+
+The platform is now an operational end-to-end delivery framework. It has real execution paths for the core delivery workflow and persistent runtime configuration, while a few provider integrations remain backlog items.
+
+### Working Now
+
+- Chat-triggered and API-triggered workflows execute the real `BA -> Architect -> Developer -> QA -> Docs -> PR` LangGraph sequence.
+- Real OpenAI-backed agents run with structured output validation, retries, token streaming, and generated artifact events.
+- Developer execution can clone repositories, create branches, apply generated file changes, analyze diffs, create commits, and prepare PR artifacts.
+- QA runtime and sandbox boundaries produce structured QA results, logs, screenshots, and evidence artifacts when sandbox dependencies are available.
+- Live execution visualization uses backend snapshots and WebSocket streams; no dummy frontend replay data is used.
+- Dynamic context engineering loads task-relevant agent rules, architecture context, repository summaries, selected files, upstream artifacts, memory context, and active runtime prompts under a token budget.
+- Governance rules are inherited from defaults, repository standards, agent markdown, and runtime-edited documents; generated outputs are validated and rejected when policy is violated.
+- Prompt Studio supports editing, preview, token estimation, live test preview, versioning, comparison, rollback, and active runtime prompt injection.
+- Governance management supports global and agent documents, versioning, rollback, reload events, and immediate runtime policy inclusion.
+- File ingestion supports markdown, txt, DOCX, and PDF uploads.
+- PostgreSQL JSONB persistence is wired for workflow executions/checkpoints, API workflow/upload state, Prompt Studio, governance config, workspaces, projects, and workspace agent configuration.
+- Docker Compose runs the FastAPI backend, Next.js dashboard, PostgreSQL, Redis, Qdrant, MinIO, QA sandboxes, Nginx, and a real LangGraph recovery worker.
+
+### Backlog
+
+- Durable cross-process event streaming should move from the in-process execution event bus to Redis Streams or Postgres-backed event replay.
+- Repository hosting provider APIs for opening remote GitHub/GitLab PRs are still boundaries; the platform currently prepares PR artifacts locally.
+- Jira and Notion ingestion adapters are intentionally not implemented yet.
+- Full object-storage publishing for all downloadable artifacts should be completed on top of MinIO.
+- Production auth hardening should connect JWT/RBAC to an external identity provider.
+- Qdrant-backed semantic retrieval is boundary-ready; the default local memory path remains lightweight.
+- Frontend editing coverage should continue expanding so every agent/runtime setting has a polished visual management surface.
+- CI should run Docker Compose smoke tests with PostgreSQL and sandbox services enabled.
 
 ## Architecture
 
@@ -60,6 +96,7 @@ core/                    Clean architecture platform foundation
   runtime/               Base agent runtime abstractions
   security/              JWT, RBAC, immutable audit
   streaming/             Real event bus, token events, logs, timelines, telemetry
+  persistence/           PostgreSQL JSONB adapters for durable platform records
   workspaces/            Tenant-aware projects, repositories, permissions, config
 deployment/              Docker, Compose, env templates, Nginx, Kubernetes-ready assets
 frontend/                Next.js dashboard
@@ -78,6 +115,7 @@ flowchart TB
   UI -. "Telemetry WebSocket" .-> TelemetryWS["/ws/workflows/{workflow_id}/telemetry"]
 
   API --> Security["Security + Audit"]
+  API --> Persistence["PostgreSQL JSONB Persistence"]
   API --> Workspaces["Multi-Workspace Management"]
   API --> Chat["Workspace Chat"]
   API --> PromptStudio["Prompt Studio"]
@@ -105,7 +143,12 @@ flowchart TB
   Runtime --> Sandbox["QA Sandbox"]
   Runtime --> Reviews["Autonomous PR Review"]
 
-  Graph --> EventBus["In-memory ExecutionEventBus"]
+  Graph --> EventBus["ExecutionEventBus"]
+  Graph --> Worker["LangGraph Recovery Worker"]
+  Persistence --> Graph
+  Persistence --> PromptStudio
+  Persistence --> Governance
+  Persistence --> Workspaces
   TokenStream --> EventBus
   EventBus --> EventWS
   EventBus --> TelemetryWS
@@ -181,9 +224,10 @@ flowchart TB
   Frontend -. "WS execution events + telemetry" .-> Backend
 
   Backend --> LangGraph["LangGraph Runtime"]
+  LangGraph --> Worker["LangGraph Recovery Worker"]
   Backend --> EventBus["ExecutionEventBus"]
   EventBus --> LiveLogs["Live logs / tokens / outputs / QA results"]
-  Backend --> Postgres["PostgreSQL"]
+  Backend --> Postgres["PostgreSQL JSONB persistence"]
   Backend --> Redis["Redis"]
   Backend --> Qdrant["Qdrant"]
   Backend --> MinIO["MinIO"]
@@ -199,11 +243,12 @@ flowchart TB
 
 - **Orchestration:** LangGraph supervisor, typed graph state, conditional routing, retries, QA rejection loops, workflow metadata.
 - **Agent Runtime:** reusable base runtime, Developer runtime, QA runtime, prompt building, context assembly, output validation, retries, telemetry hooks, and OpenAI token streaming callbacks.
-- **Context and Memory:** markdown loading, context compression, token budgeting, isolated agent context, short/long-term memory, ADR/bug/execution history memory, semantic indexing, vector-ready retrieval, Qdrant-ready boundary.
-- **Workspace and Project Management:** tenant-aware workspaces, projects, repository bindings, workspace permissions, workspace-specific agent config, isolated storage/memory/governance namespaces.
+- **Persistence:** PostgreSQL JSONB adapters for workflow executions, checkpoints, uploads, Prompt Studio, governance config, workspaces, projects, and agent configuration; in-memory adapters remain for focused tests.
+- **Context and Memory:** dynamic context loading, semantic repository file selection, architecture-aware loading, context compression, token budgeting, isolated agent context, short/long-term memory, ADR/bug/execution history memory, semantic indexing, vector-ready retrieval, Qdrant-ready boundary.
+- **Workspace and Project Management:** tenant-aware workspaces, projects, repository bindings, workspace permissions, editable workspace-specific agent config, isolated storage/memory/governance namespaces.
 - **Repository Automation:** isolated Git workspaces, clone/branch/diff/commit/PR preparation, repository scanning, framework detection, dependency graphing, architecture summaries.
 - **Quality and Review:** autonomous QA output contracts, Playwright/Selenium sandbox boundaries, screenshot/log/evidence artifacts, autonomous PR review, structured comments, severity classification, merge readiness scoring.
-- **Governance and Prompts:** global and agent policies, inheritance, policy validation, editable governance UI, Prompt Engineering Studio with markdown editing, variables, preview, testing, versioning, comparison, rollback, token estimation.
+- **Governance and Prompts:** global and agent policies, inheritance, conflict-aware merge rules, runtime validation, output rejection, editable governance UI, Prompt Engineering Studio with markdown editing, variables, preview, testing, versioning, comparison, rollback, token estimation, and runtime prompt injection.
 - **Security and Audit:** JWT auth boundary, RBAC roles/permissions, optional security middleware, route dependency helpers, immutable hash-chained audit events, audit APIs.
 - **Observability and Streaming:** execution event bus, event history replay on WebSocket connect, live logs, token chunks, generated output events, QA telemetry, timelines, workflow telemetry, metrics, traces, analytics, Prometheus/OpenTelemetry/Datadog/Grafana-ready outputs.
 - **Dashboard:** Next.js App Router UI backed by `/dashboard/snapshot`, execution and telemetry WebSockets, live workflow graph, agent status, retries, tokens, generated outputs, QA results, approvals, observability, QA reports, docs, PR summaries, Mermaid diagrams, and an empty live-state shell when no backend is configured.
@@ -219,6 +264,15 @@ flowchart TB
 - `/ws/workflows/{workflow_id}/telemetry`: streams live workflow graph snapshots after every workflow event.
 - `/dashboard/snapshot`: builds the dashboard state from the latest real workflow, event history, generated artifacts, QA telemetry, logs, retries, and token counters.
 - `useExecutionStream` and `useWorkflowTelemetry`: consume websocket data only; they no longer synthesize replayed or timer-driven execution movement.
+
+## Runtime Configuration
+
+Runtime configuration is editable without restarting the backend when PostgreSQL is configured:
+
+- Active Prompt Studio documents are loaded into agent prompt context for matching global or agent scope.
+- Governance documents are parsed into runtime rules and merged into the effective policy for matching global or agent scope.
+- Workflow records, checkpoints, uploads, workspaces, projects, prompt versions, and governance versions persist to PostgreSQL JSONB.
+- Rollbacks create new persisted versions and immediately affect the next execution.
 
 ## API Areas
 
@@ -276,7 +330,9 @@ npm.cmd run typecheck
 npm.cmd run build
 ```
 
-Latest targeted streaming/API verification: `15 passed` for `tests\test_execution_streaming.py`, `tests\test_fastapi_backend.py`, and `tests\test_chat_workflow_execution.py`.
+Latest targeted backend verification: `43 passed` for context engineering, runtime foundation, governance, Prompt Studio, workspace management, FastAPI, real workflow runtime, developer runtime, and story ingestion tests.
+
+Additional QA/repository verification: streaming, QA runtime, PR review, and most sandbox tests passed locally; repository Git tests were blocked by Windows file permission/lock errors under generated `outputs/.../.git` folders.
 
 ## Deployment Assets
 
@@ -298,3 +354,7 @@ Latest targeted streaming/API verification: `15 passed` for `tests\test_executio
 - Keep audit events immutable.
 - Prefer typed contracts and async-first boundaries.
 - Keep local in-memory implementations replaceable by Redis, PostgreSQL, Qdrant, object storage, and enterprise identity providers.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).

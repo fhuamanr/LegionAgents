@@ -6,66 +6,88 @@ flowchart TB
   Frontend -. "history replay + live events" .-> ExecutionWS["/ws/executions/{workflow_id}"]
   Frontend -. "live graph snapshots" .-> TelemetryWS["/ws/workflows/{workflow_id}/telemetry"]
 
-  API --> Ingestion["User Story Ingestion"]
-  API --> Approvals["Human Approval Workflow"]
-  API --> Observability["Observability and Telemetry"]
-  API --> Graph["LangGraph Orchestration"]
-  API --> DashboardSnapshot["Dashboard Snapshot Service"]
-  API --> Reports["Reports / Docs / PR APIs"]
+  API --> Uploads["PDF / DOCX / MD / TXT Uploads"]
+  API --> Chat["Workspace Chat"]
+  API --> PromptStudio["Prompt Studio"]
+  API --> GovernanceEditor["Governance Editor"]
+  API --> WorkspaceConfig["Workspace + Agent Config"]
+  API --> Graph["LangGraph Execution Runtime"]
+  API --> Observability["Logs / Metrics / Telemetry"]
+  API --> Persistence["PostgreSQL JSONB Persistence"]
 
-  Ingestion --> BA["BA Agent"]
-  Graph --> BA
+  Persistence --> WorkflowRecords["Workflow Records + Checkpoints"]
+  Persistence --> PromptVersions["Prompt Versions + Rollback"]
+  Persistence --> GovernanceVersions["Governance Versions + Rollback"]
+  Persistence --> WorkspaceRecords["Workspaces / Projects / Agent Config"]
+  Persistence --> UploadRecords["Upload Metadata"]
+
+  Uploads --> Ingestion["Story Ingestion Pipeline"]
+  Chat --> LiveStart
+  Ingestion --> Graph
+
+  PromptStudio --> RuntimePrompts["Active Runtime Prompts"]
+  GovernanceEditor --> RuntimePolicy["Runtime Governance Policy"]
+  RuntimePrompts --> ContextEngineering
+  RuntimePolicy --> GovernanceEngine
+
+  Graph --> BA["BA Agent"]
   BA --> Architect["Architect Agent"]
   Architect --> Developer["Developer Agent"]
-
-  Developer --> RepoEngine["Autonomous Repository Engine"]
-  RepoEngine --> Git["Secure Git Service"]
-  Git --> Developer
-
   Developer --> QA["QA Agent"]
-  QA --> QASandbox["QA Execution Sandbox"]
-  QASandbox --> Evidence["Screenshots / Videos / Logs / Test Evidence"]
-  Evidence --> QA
-
   QA -->|approved| Docs["Docs Agent"]
-  QA -->|rejected| Developer
-  QA -->|override required| Approvals
-  Approvals -->|approved| Docs
+  QA -->|rejected retry| Developer
   Docs --> PR["PR Agent"]
 
   Graph --> Runtime["Reusable Agent Runtime"]
-  Runtime --> Context["Context Engineering"]
-  Runtime --> Memory["Shared Memory"]
-  Runtime --> Governance["Governance Engine"]
-  Runtime --> Prompts["Prompt Builder"]
-  Runtime --> Contracts["Output Contracts"]
+  Runtime --> ContextEngineering["Dynamic Context Engineering"]
+  Runtime --> GovernanceEngine["Governance Engine"]
+  Runtime --> OutputValidation["Structured Output Validation"]
   Runtime --> TokenCallback["Token Streaming Callback"]
+  Runtime --> LLM["OpenAI / Compatible LLM"]
 
-  Context --> Prompts
-  Memory --> Prompts
-  Governance --> Prompts
-  Prompts --> LLM["Codex / LLM"]
+  ContextEngineering --> RepoSummary["Repository Summary"]
+  ContextEngineering --> SemanticFiles["Semantic File Selection"]
+  ContextEngineering --> ArchitectureContext["Architecture-Aware Loading"]
+  ContextEngineering --> TokenBudget["Token Budgeting"]
+  ContextEngineering --> AgentIsolation["Agent Context Isolation"]
+
+  GovernanceEngine --> PromptRules["Policy Injection Into Prompts"]
+  GovernanceEngine --> RuntimeValidation["Runtime + Output Validation"]
+  GovernanceEngine --> ArchitectureRules["Architecture Enforcement"]
+  RuntimeValidation -->|reject invalid output| Graph
+
+  Developer --> RepoRuntime["Repository Runtime"]
+  RepoRuntime --> Git["Clone / Branch / Modify / Diff / Commit"]
+  Git --> PRArtifacts["Prepared PR Artifacts"]
+  PRArtifacts --> PR
+
+  QA --> QASandbox["QA Sandbox"]
+  QASandbox --> Screenshots["Screenshots"]
+  QASandbox --> Evidence["Logs / Test Evidence"]
+  Screenshots --> QA
+  Evidence --> QA
+
   LLM -->|"stream_complete chunks"| TokenCallback
-  LLM --> Structured["Structured Agent Outputs"]
-  Structured --> OutputEvents["output_generated events"]
-  QA --> QATelemetry["telemetry_recorded QA results"]
-  TokenCallback --> TokenEvents["token_streamed events"]
+  LLM --> StructuredOutputs["Generated Structured Outputs"]
+  StructuredOutputs --> OutputValidation
 
   Graph --> EventBus["ExecutionEventBus"]
-  EventBus --> Progress["progress_updated events"]
-  EventBus --> Logs["log_emitted events"]
-  TokenEvents --> EventBus
-  OutputEvents --> EventBus
-  QATelemetry --> EventBus
+  TokenCallback --> TokenEvents["token_streamed events"]
+  StructuredOutputs --> OutputEvents["output_generated events"]
+  QA --> QAEvents["QA telemetry events"]
   EventBus --> ExecutionWS
   EventBus --> TelemetryWS
-  EventBus --> DashboardSnapshot
-  EventBus --> Observability
-  DashboardSnapshot --> Snapshot
-  LiveStart --> Graph
-  Reports --> DashboardSnapshot
+  EventBus --> Snapshot
+  TokenEvents --> EventBus
+  OutputEvents --> EventBus
+  QAEvents --> EventBus
 
-  API --> Deployment["Docker / Compose / Kubernetes-ready Deployment"]
-  Deployment -. "future" .-> Redis["Redis"]
-  Deployment -. "future" .-> Postgres["PostgreSQL"]
-  Deployment -. "future" .-> ObjectStorage["Object Storage"]
+  Worker["LangGraph Recovery Worker"] --> Persistence
+  Worker --> Graph
+
+  API --> Backlog["Backlog"]
+  Backlog --> DurableEvents["Redis/Postgres durable event bus"]
+  Backlog --> HostedPRs["GitHub/GitLab PR creation"]
+  Backlog --> JiraNotion["Jira/Notion ingestion"]
+  Backlog --> ObjectStorage["MinIO artifact publishing"]
+  Backlog --> SSO["External SSO / IdP"]

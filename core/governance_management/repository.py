@@ -13,6 +13,7 @@ from core.contracts.governance_management import (
     GovernanceConfigUpsert,
     GovernanceConfigVersion,
 )
+from core.persistence import PostgresJsonDocumentStore
 
 
 class GovernanceConfigRepository(ABC):
@@ -193,3 +194,130 @@ class FileGovernanceConfigRepository(InMemoryGovernanceConfigRepository):
             ],
         }
         self._storage_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+class PostgresGovernanceConfigRepository(GovernanceConfigRepository):
+    """PostgreSQL-backed editable governance persistence."""
+
+    _documents_bucket = "governance_documents"
+    _versions_bucket = "governance_versions"
+
+    def __init__(self, store: PostgresJsonDocumentStore) -> None:
+        self._store = store
+
+    async def upsert(self, request: GovernanceConfigUpsert) -> tuple[GovernanceConfigDocument, GovernanceConfigVersion]:
+        existing = self._find_existing(await self.list(), request)
+        now = datetime.now(timezone.utc)
+        if existing is None:
+            document = GovernanceConfigDocument(
+                scope=request.scope,
+                kind=request.kind,
+                name=request.name,
+                markdown=request.markdown,
+                agent_name=request.agent_name,
+                updated_by=request.updated_by,
+                metadata=request.metadata,
+                created_at=now,
+                updated_at=now,
+            )
+        else:
+            document = existing.model_copy(
+                update={
+                    "name": request.name,
+                    "markdown": request.markdown,
+                    "version": existing.version + 1,
+                    "updated_by": request.updated_by,
+                    "updated_at": now,
+                    "metadata": {**existing.metadata, **request.metadata},
+                }
+            )
+        version = GovernanceConfigVersion(
+            document_id=document.id,
+            version=document.version,
+            markdown=document.markdown,
+            changed_by=request.updated_by,
+            change_summary=request.change_summary,
+            metadata={"kind": document.kind.value, "scope": document.scope.value, "agent_name": document.agent_name},
+        )
+        await self._store.upsert(
+            bucket=self._documents_bucket,
+            document_id=document.id,
+            key=self._document_key(document),
+            payload=document.model_dump(mode="json"),
+        )
+        await self._store.upsert(
+            bucket=self._versions_bucket,
+            document_id=version.id,
+            key=f"{document.id}:{version.version:08d}",
+            payload=version.model_dump(mode="json"),
+        )
+        return document, version
+
+    async def get(self, document_id: UUID) -> GovernanceConfigDocument:
+        return GovernanceConfigDocument.model_validate(
+            await self._store.get(bucket=self._documents_bucket, document_id=document_id)
+        )
+
+    async def list(
+        self,
+        scope: GovernanceConfigScope | None = None,
+        agent_name: str | None = None,
+        kind: GovernanceConfigKind | None = None,
+    ) -> tuple[GovernanceConfigDocument, ...]:
+        documents = tuple(
+            GovernanceConfigDocument.model_validate(item)
+            for item in await self._store.list(bucket=self._documents_bucket)
+        )
+        return tuple(
+            document
+            for document in documents
+            if (scope is None or document.scope == scope)
+            and (agent_name is None or document.agent_name == agent_name)
+            and (kind is None or document.kind == kind)
+        )
+
+    async def versions(self, document_id: UUID) -> tuple[GovernanceConfigVersion, ...]:
+        versions = tuple(
+            GovernanceConfigVersion.model_validate(item)
+            for item in await self._store.list(
+                bucket=self._versions_bucket,
+                key_prefix=f"{document_id}:",
+            )
+        )
+        return tuple(sorted(versions, key=lambda item: item.version))
+
+    async def restore_version(
+        self,
+        document_id: UUID,
+        target_version: int,
+        updated_by: str,
+        change_summary: str | None,
+    ) -> tuple[GovernanceConfigDocument, GovernanceConfigVersion]:
+        document = await self.get(document_id)
+        versions = await self.versions(document_id)
+        target = next(version for version in versions if version.version == target_version)
+        return await self.upsert(
+            GovernanceConfigUpsert(
+                scope=document.scope,
+                kind=document.kind,
+                name=document.name,
+                markdown=target.markdown,
+                agent_name=document.agent_name,
+                updated_by=updated_by,
+                change_summary=change_summary or f"Rollback to version {target_version}",
+                metadata={**document.metadata, "rollback_from_version": document.version, "rollback_to_version": target_version},
+            )
+        )
+
+    def _find_existing(
+        self,
+        documents: tuple[GovernanceConfigDocument, ...],
+        request: GovernanceConfigUpsert,
+    ) -> GovernanceConfigDocument | None:
+        for document in documents:
+            if document.scope == request.scope and document.kind == request.kind and document.agent_name == request.agent_name:
+                return document
+        return None
+
+    def _document_key(self, document: GovernanceConfigDocument) -> str:
+        return f"{document.scope.value}:{document.agent_name or '*'}:{document.kind.value}"

@@ -1,15 +1,19 @@
 """Runtime context assembly."""
 
 from abc import ABC, abstractmethod
+import os
 from pathlib import Path
 
 from core.context import FileSystemAgentContextLoader
 from core.context_engineering.engine import ContextEngineeringEngine
 from core.context_engineering.models import ContextEngineeringConfig, ContextEngineeringRequest
 from core.contracts.artifacts import ArtifactKind
-from core.contracts.context import AgentContext
+from core.contracts.context import AgentContext, ContextDocument, ContextPriority, ContextSection, ContextSectionName
 from core.contracts.execution import AgentExecutionRequest
+from core.contracts.prompt_studio import PromptScope, PromptStatus
 from core.governance import AgentGovernanceEngine
+from core.persistence import PostgresJsonDocumentStore
+from core.prompt_studio import PostgresPromptRepository
 from core.runtime.models import RuntimeAgentConfig
 
 
@@ -56,10 +60,11 @@ class MarkdownRuleContextAssembler(ContextAssembler):
                 config=self._config_from_runtime(config),
             )
         )
-        return engineered.context.model_copy(
+        context = await self._append_runtime_prompts(engineered.context, config)
+        return context.model_copy(
             update={
                 "metadata": {
-                    **engineered.context.metadata,
+                    **context.metadata,
                     "context_warnings": engineered.warnings,
                     "requested_agent": request.agent_name,
                     "context_engineering": {
@@ -127,6 +132,73 @@ class MarkdownRuleContextAssembler(ContextAssembler):
             else:
                 values.append(f"{artifact.kind.value} artifact from {artifact.producer_agent}: {artifact.name}")
         return tuple(values)
+
+    async def _append_runtime_prompts(
+        self,
+        context: AgentContext,
+        config: RuntimeAgentConfig,
+    ) -> AgentContext:
+        repository = self._runtime_prompt_repository()
+        if repository is None:
+            return context
+        prompts = tuple(await repository.list(scope=PromptScope.GLOBAL, status=PromptStatus.ACTIVE)) + tuple(
+            await repository.list(scope=PromptScope.AGENT, agent_name=config.name, status=PromptStatus.ACTIVE)
+        )
+        documents = tuple(
+            ContextDocument(
+                name=f"Runtime Prompt: {prompt.name}",
+                path=Path(f"runtime/prompts/{prompt.id}.md"),
+                content=prompt.markdown,
+                section=ContextSectionName.PROMPTS,
+                priority=ContextPriority.HIGH,
+                token_hint=max(1, len(prompt.markdown) // 4),
+                metadata={
+                    "prompt_id": str(prompt.id),
+                    "prompt_version": prompt.version,
+                    "scope": prompt.scope.value,
+                    "agent_name": prompt.agent_name,
+                    "runtime_editable": True,
+                },
+            )
+            for prompt in prompts
+            if prompt.markdown.strip()
+        )
+        if not documents:
+            return context
+        sections = list(context.sections)
+        prompt_index = next(
+            (index for index, section in enumerate(sections) if section.name == ContextSectionName.PROMPTS),
+            None,
+        )
+        if prompt_index is None:
+            sections.append(
+                ContextSection(
+                    name=ContextSectionName.PROMPTS,
+                    documents=documents,
+                    priority=ContextPriority.HIGH,
+                )
+            )
+        else:
+            section = sections[prompt_index]
+            sections[prompt_index] = section.model_copy(
+                update={"documents": section.documents + documents, "priority": ContextPriority.HIGH}
+            )
+        return context.model_copy(
+            update={
+                "sections": tuple(sections),
+                "metadata": {
+                    **context.metadata,
+                    "runtime_prompt_count": len(documents),
+                    "document_count": int(context.metadata.get("document_count", 0)) + len(documents),
+                },
+            }
+        )
+
+    def _runtime_prompt_repository(self) -> PostgresPromptRepository | None:
+        dsn = os.getenv("POSTGRES_DSN", "").strip()
+        if not dsn:
+            return None
+        return PostgresPromptRepository(PostgresJsonDocumentStore(dsn))
 
 
 class GovernanceRuntimeContextAssembler(MarkdownRuleContextAssembler):

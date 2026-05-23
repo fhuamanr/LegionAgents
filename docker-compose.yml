@@ -118,14 +118,7 @@ services:
     environment:
       <<: *backend-env
       RUNTIME_ROLE: langgraph-worker
-    command:
-      - python
-      - -c
-      - |
-        import time
-        import core.graph
-        print("LangGraph runtime worker ready", flush=True)
-        time.sleep(10**9)
+    command: ["python", "-m", "core.graph.worker"]
     volumes:
       - ./core:/app/core
       - ./agents:/app/agents:ro

@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timezone
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -22,6 +23,7 @@ from app.schemas import (
     WorkflowStatus,
 )
 from core.agents.runtime import AgentModelClient
+from core.ingestion import StoryIngestionPipeline
 from core.streaming import (
     ExecutionEvent,
     ExecutionEventEmitter,
@@ -35,17 +37,21 @@ from core.streaming import (
 from core.graph import (
     InMemoryWorkflowExecutionRepository,
     LangGraphExecutionRuntime,
+    WorkflowExecutionRepository,
     WorkflowRunStatus,
 )
+from core.persistence import PostgresJsonDocumentStore
 
 
 class ExecutionService:
-    """In-memory application service for workflow and execution APIs."""
+    """Application service for real workflow execution APIs."""
 
     def __init__(
         self,
         event_bus: InMemoryExecutionEventBus | None = None,
         model_client: AgentModelClient | None = None,
+        workflow_repository: WorkflowExecutionRepository | None = None,
+        state_store: PostgresJsonDocumentStore | None = None,
     ) -> None:
         self.event_bus = event_bus or InMemoryExecutionEventBus()
         self._model_client = model_client
@@ -53,7 +59,8 @@ class ExecutionService:
         self.logger = StructuredExecutionLogger(self.emitter)
         self.tracker = ExecutionTracker(self.event_bus)
         self.timeline = TimelineGenerator(self.event_bus)
-        self.workflow_repository = InMemoryWorkflowExecutionRepository()
+        self.workflow_repository = workflow_repository or InMemoryWorkflowExecutionRepository()
+        self._state_store = state_store
         self._uploads: dict[UUID, StoredUpload] = {}
         self._workflows: dict[UUID, WorkflowResponse] = {}
         self._agent_statuses: dict[str, WorkflowStatus] = {
@@ -72,6 +79,8 @@ class ExecutionService:
             "docs": "Docs",
             "pr": "PR",
         }
+        self._ingestion = StoryIngestionPipeline()
+        self._upload_root = Path("outputs/uploads").resolve()
 
     async def upload_user_story(self, request: UserStoryUploadRequest) -> UploadResponse:
         upload = StoredUpload(
@@ -80,6 +89,40 @@ class ExecutionService:
             metadata=request.metadata,
         )
         self._uploads[upload.upload_id] = upload
+        await self._persist_upload(upload)
+        return UploadResponse(
+            upload_id=upload.upload_id,
+            title=upload.title,
+            received_at=upload.received_at,
+        )
+
+    async def upload_file(
+        self,
+        *,
+        file_name: str,
+        content: bytes,
+        content_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> UploadResponse:
+        upload_id = uuid4()
+        safe_name = self._safe_upload_name(file_name)
+        upload_path = self._upload_root / str(upload_id) / safe_name
+        upload_path.parent.mkdir(parents=True, exist_ok=True)
+        upload_path.write_bytes(content)
+        ingestion = await self._ingestion.ingest_path(upload_path)
+        upload = StoredUpload(
+            upload_id=upload_id,
+            title=file_name,
+            content="\n\n".join(story.story.title for story in ingestion.stories) or ingestion.source.name,
+            metadata={
+                **(metadata or {}),
+                "path": str(upload_path),
+                "content_type": content_type,
+                "ingestion": ingestion.model_dump(mode="json"),
+            },
+        )
+        self._uploads[upload.upload_id] = upload
+        await self._persist_upload(upload)
         return UploadResponse(
             upload_id=upload.upload_id,
             title=upload.title,
@@ -113,6 +156,7 @@ class ExecutionService:
             metadata=metadata,
         )
         self._workflows[workflow_id] = workflow
+        await self._persist_workflow(workflow)
         await self.tracker.start_workflow(workflow_id=workflow_id, total_steps=6)
         return workflow
 
@@ -150,6 +194,7 @@ class ExecutionService:
             }
         )
         self._workflows[workflow_id] = final_workflow
+        await self._persist_workflow(final_workflow)
         return final_workflow
 
     async def recover_workflow(
@@ -184,12 +229,19 @@ class ExecutionService:
             }
         )
         self._workflows[workflow_id] = updated
+        await self._persist_workflow(updated)
         return updated
 
     async def get_workflow(self, workflow_id: UUID) -> WorkflowResponse:
+        if workflow_id not in self._workflows:
+            restored = await self._load_workflow(workflow_id)
+            if restored is not None:
+                self._workflows[workflow_id] = restored
         return self._workflows[workflow_id]
 
     async def latest_workflow(self) -> WorkflowResponse | None:
+        if not self._workflows:
+            await self._load_workflows()
         if not self._workflows:
             return None
         return max(self._workflows.values(), key=lambda workflow: workflow.created_at)
@@ -206,6 +258,7 @@ class ExecutionService:
             }
         )
         self._workflows[workflow_id] = updated
+        await self._persist_workflow(updated)
         return updated
 
     async def resume_workflow(self, workflow_id: UUID, metadata: dict[str, Any]) -> WorkflowResponse:
@@ -220,10 +273,11 @@ class ExecutionService:
             }
         )
         self._workflows[workflow_id] = updated
+        await self._persist_workflow(updated)
         return updated
 
     async def get_execution_status(self, workflow_id: UUID) -> ExecutionStatusResponse:
-        workflow = self._workflows[workflow_id]
+        workflow = await self.get_workflow(workflow_id)
         progress = await self.tracker.get(workflow_id)
         return ExecutionStatusResponse(
             workflow_id=workflow_id,
@@ -243,7 +297,7 @@ class ExecutionService:
     async def get_workflow_telemetry(self, workflow_id: UUID) -> WorkflowTelemetryResponse:
         """Build a live visualization snapshot for a workflow."""
 
-        workflow = self._workflows[workflow_id]
+        workflow = await self.get_workflow(workflow_id)
         events = await self.event_bus.history(workflow_id=workflow_id)
         progress = await self.tracker.get(workflow_id)
         now = datetime.now(timezone.utc)
@@ -270,7 +324,7 @@ class ExecutionService:
         return dict(self._agent_statuses)
 
     async def get_report(self, workflow_id: UUID, kind: str) -> ReportResponse:
-        workflow = self._workflows[workflow_id]
+        workflow = await self.get_workflow(workflow_id)
         logs = await self.get_logs(workflow_id)
         execution_id = workflow.metadata.get("execution_id")
         latest_state: dict[str, Any] | None = None
@@ -545,3 +599,43 @@ class ExecutionService:
 
     def _duration_ms(self, start: datetime, end: datetime) -> int:
         return max(0, int((end - start).total_seconds() * 1000))
+
+    async def _persist_workflow(self, workflow: WorkflowResponse) -> None:
+        if self._state_store is None:
+            return
+        await self._state_store.upsert(
+            bucket="api_workflows",
+            document_id=workflow.workflow_id,
+            key=workflow.created_at.isoformat(),
+            payload=workflow.model_dump(mode="json"),
+        )
+
+    async def _load_workflow(self, workflow_id: UUID) -> WorkflowResponse | None:
+        if self._state_store is None:
+            return None
+        try:
+            payload = await self._state_store.get(bucket="api_workflows", document_id=workflow_id)
+        except KeyError:
+            return None
+        return WorkflowResponse.model_validate(payload)
+
+    async def _load_workflows(self) -> None:
+        if self._state_store is None:
+            return
+        for payload in await self._state_store.list(bucket="api_workflows"):
+            workflow = WorkflowResponse.model_validate(payload)
+            self._workflows[workflow.workflow_id] = workflow
+
+    async def _persist_upload(self, upload: StoredUpload) -> None:
+        if self._state_store is None:
+            return
+        await self._state_store.upsert(
+            bucket="uploads",
+            document_id=upload.upload_id,
+            key=upload.received_at.isoformat(),
+            payload=upload.model_dump(mode="json"),
+        )
+
+    def _safe_upload_name(self, file_name: str) -> str:
+        cleaned = "".join(character if character.isalnum() or character in ".-_" else "-" for character in file_name)
+        return cleaned.strip(".-") or "upload.txt"

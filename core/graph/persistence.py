@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.contracts.states import WorkflowExecutionState
+from core.persistence import PostgresJsonDocumentStore
 
 
 class WorkflowRunStatus(StrEnum):
@@ -151,3 +152,76 @@ class InMemoryWorkflowExecutionRepository(WorkflowExecutionRepository):
         )
         self._records[execution_id] = updated
         return updated
+
+
+class PostgresWorkflowExecutionRepository(WorkflowExecutionRepository):
+    """PostgreSQL-backed workflow execution and checkpoint persistence."""
+
+    _bucket = "workflow_executions"
+
+    def __init__(self, store: PostgresJsonDocumentStore) -> None:
+        self._store = store
+
+    async def create(self, record: WorkflowExecutionRecord) -> WorkflowExecutionRecord:
+        await self._persist(record)
+        return record
+
+    async def get(self, execution_id: UUID) -> WorkflowExecutionRecord:
+        return WorkflowExecutionRecord.model_validate(
+            await self._store.get(bucket=self._bucket, document_id=execution_id)
+        )
+
+    async def update(self, record: WorkflowExecutionRecord) -> WorkflowExecutionRecord:
+        updated = record.model_copy(
+            update={"updated_at": datetime.now(timezone.utc)},
+            deep=True,
+        )
+        await self._persist(updated)
+        return updated
+
+    async def append_checkpoint(self, checkpoint: WorkflowCheckpoint) -> WorkflowExecutionRecord:
+        record = await self.get(checkpoint.execution_id)
+        updated = record.model_copy(
+            update={
+                "status": checkpoint.status,
+                "updated_at": checkpoint.created_at,
+                "active_agent": checkpoint.active_agent,
+                "next_agent": checkpoint.next_agent,
+                "checkpoints": record.checkpoints + (checkpoint.model_copy(deep=True),),
+                "metadata": {
+                    **record.metadata,
+                    "last_checkpoint_id": str(checkpoint.checkpoint_id),
+                    "last_checkpoint_sequence": checkpoint.sequence,
+                },
+            }
+        )
+        await self._persist(updated)
+        return updated
+
+    async def latest_checkpoint(self, execution_id: UUID) -> WorkflowCheckpoint | None:
+        record = await self.get(execution_id)
+        if not record.checkpoints:
+            return None
+        return deepcopy(record.checkpoints[-1])
+
+    async def cancel(self, execution_id: UUID, reason: str | None = None) -> WorkflowExecutionRecord:
+        record = await self.get(execution_id)
+        now = datetime.now(timezone.utc)
+        updated = record.model_copy(
+            update={
+                "status": WorkflowRunStatus.CANCELLED,
+                "updated_at": now,
+                "cancelled_at": now,
+                "cancellation_reason": reason,
+            }
+        )
+        await self._persist(updated)
+        return updated
+
+    async def _persist(self, record: WorkflowExecutionRecord) -> None:
+        await self._store.upsert(
+            bucket=self._bucket,
+            document_id=record.execution_id,
+            key=f"{record.workflow_id}:{record.created_at.isoformat()}",
+            payload=record.model_dump(mode="json"),
+        )

@@ -11,6 +11,7 @@ from core.graph.nodes import AgentExecutor, AgentGraphNode, GraphNode
 from core.graph.orchestrator import GraphOrchestrator, LangGraphWorkflowAdapter
 from core.graph.persistence import (
     InMemoryWorkflowExecutionRepository,
+    PostgresWorkflowExecutionRepository,
     WorkflowCheckpoint,
     WorkflowExecutionRecord,
     WorkflowExecutionRepository,
@@ -33,6 +34,7 @@ __all__ = [
     "LangGraphBuilder",
     "LangGraphRuntimeState",
     "LangGraphWorkflowAdapter",
+    "PostgresWorkflowExecutionRepository",
     "RealWorkflowRuntimeState",
     "RouteDecision",
     "RouteSignal",
