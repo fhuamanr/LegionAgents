@@ -9,6 +9,9 @@ from core.context_engineering import (
     MemoryContextProvider,
 )
 from core.context_engineering.models import ContextItemSource
+from core.contracts.execution import AgentExecutionRequest
+from core.runtime.context import GovernanceRuntimeContextAssembler
+from core.runtime.models import RuntimeAgentConfig
 from core.contracts.memory import MemoryScope
 from core.memory import MemorySystem
 
@@ -130,3 +133,63 @@ async def test_context_engineering_can_disable_unnecessary_repository_loading() 
         item.source != ContextItemSource.REPOSITORY_SUMMARY
         for item in result.selected_items
     )
+
+
+@pytest.mark.asyncio
+async def test_context_engineering_selects_semantic_repository_files() -> None:
+    engine = ContextEngineeringEngine()
+
+    result = await engine.build(
+        ContextEngineeringRequest(
+            agent_name="developer",
+            task="Implement context engineering runtime with token budgeting",
+            agent_context_path=Path.cwd() / "agents" / "developer",
+            repository_path=Path.cwd(),
+            config=ContextEngineeringConfig(
+                max_token_hint=2500,
+                reserved_output_token_hint=500,
+                selected_repository_file_limit=4,
+            ),
+        )
+    )
+
+    repository_files = [
+        item
+        for item in result.selected_items
+        if item.source == ContextItemSource.REPOSITORY_FILE
+    ]
+
+    assert repository_files
+    assert any("core/context_engineering/" in str(item.metadata["path"]) for item in repository_files)
+    assert result.token_hint <= result.metadata["token_budget"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_assembler_uses_engineered_isolated_context() -> None:
+    assembler = GovernanceRuntimeContextAssembler()
+
+    context = await assembler.assemble(
+        AgentExecutionRequest(
+            agent_name="developer",
+            task="Implement semantic context selection",
+            metadata={"repository_path": str(Path.cwd())},
+        ),
+        RuntimeAgentConfig(
+            name="developer",
+            role="software developer",
+            context_path=Path.cwd() / "agents" / "developer",
+            max_context_token_hint=2200,
+            metadata={
+                "reserved_output_token_hint": 500,
+                "selected_repository_file_limit": 3,
+            },
+        ),
+    )
+
+    telemetry = context.metadata["context_engineering"]
+
+    assert context.agent_name == "developer"
+    assert telemetry["engineered"] is True
+    assert telemetry["token_hint"] <= telemetry["token_budget"]
+    assert any("repository-file-" in item_id for item_id in telemetry["selected_items"])
+    assert "SIEMPRE validar criterios" not in context.render()

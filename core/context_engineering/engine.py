@@ -60,7 +60,7 @@ class ContextEngineeringEngine:
         candidates.extend(self._upstream_items(request))
         candidates.extend(await self._memory_provider.provide(request))
 
-        selected_candidates = await self._selector.select(tuple(candidates))
+        selected_candidates = await self._selector.select(tuple(candidates), request)
         compressed = await self._compressor.compress(selected_candidates, request.config)
         selected, dropped = self._budget_manager.fit(compressed, request.config)
         final_context = await self._assembler.assemble(
@@ -89,6 +89,7 @@ class ContextEngineeringEngine:
                 "selected_count": len(selected),
                 "dropped_count": len(dropped),
                 "token_budget": request.config.context_token_budget,
+                "repository_file_limit": request.config.selected_repository_file_limit,
             },
         )
 
@@ -125,7 +126,7 @@ class ContextEngineeringEngine:
     ) -> tuple[ContextItem, ...]:
         if not request.config.enable_repository_summary:
             return tuple()
-        return await self._repository_provider.provide(request.repository_path)
+        return await self._repository_provider.provide(request.repository_path, request)
 
     async def _architecture_items(
         self,
@@ -183,6 +184,8 @@ class ContextEngineeringEngine:
 
     def _section_for_item(self, item: ContextItem) -> ContextSectionName:
         if item.source == ContextItemSource.ARCHITECTURE_SUMMARY:
+            return ContextSectionName.ARCHITECTURE_CONSTRAINTS
+        if item.source == ContextItemSource.REPOSITORY_FILE and item.metadata.get("architecture_context"):
             return ContextSectionName.ARCHITECTURE_CONSTRAINTS
         if item.source == ContextItemSource.AGENT_RULES:
             section = item.metadata.get("section")

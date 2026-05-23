@@ -16,6 +16,7 @@ class ContextItemSource(StrEnum):
 
     AGENT_RULES = "agent_rules"
     REPOSITORY_SUMMARY = "repository_summary"
+    REPOSITORY_FILE = "repository_file"
     ARCHITECTURE_SUMMARY = "architecture_summary"
     MEMORY = "memory"
     VECTOR_MEMORY = "vector_memory"
@@ -44,6 +45,9 @@ class ContextEngineeringConfig(ContractBaseModel):
     enable_memory: bool = True
     enable_compression: bool = True
     repository_file_limit: int = Field(default=200, ge=1)
+    selected_repository_file_limit: int = Field(default=12, ge=0)
+    repository_file_token_soft_limit: int = Field(default=900, ge=100)
+    repository_file_max_bytes: int = Field(default=20_000, ge=1000)
     item_token_soft_limit: int = Field(default=700, ge=100)
 
     @property

@@ -4,7 +4,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from core.context import FileSystemAgentContextLoader
-from core.contracts.context import AgentContext, ContextLoadRequest
+from core.context_engineering.engine import ContextEngineeringEngine
+from core.context_engineering.models import ContextEngineeringConfig, ContextEngineeringRequest
+from core.contracts.artifacts import ArtifactKind
+from core.contracts.context import AgentContext
 from core.contracts.execution import AgentExecutionRequest
 from core.governance import AgentGovernanceEngine
 from core.runtime.models import RuntimeAgentConfig
@@ -23,45 +26,124 @@ class ContextAssembler(ABC):
 
 
 class MarkdownRuleContextAssembler(ContextAssembler):
-    """Loads markdown and Mermaid rule files from an agent context directory."""
+    """Builds budgeted markdown, repository, memory, and upstream context."""
 
-    def __init__(self, context_loader: FileSystemAgentContextLoader | None = None) -> None:
+    def __init__(
+        self,
+        context_loader: FileSystemAgentContextLoader | None = None,
+        context_engineering_engine: ContextEngineeringEngine | None = None,
+    ) -> None:
         self._context_loader = context_loader or FileSystemAgentContextLoader()
+        self._context_engineering_engine = context_engineering_engine or ContextEngineeringEngine(
+            context_loader=self._context_loader,
+        )
 
     async def assemble(
         self,
         request: AgentExecutionRequest,
         config: RuntimeAgentConfig,
     ) -> AgentContext:
-        result = await self._context_loader.load_request(
-            ContextLoadRequest(
+        engineered = await self._context_engineering_engine.build(
+            ContextEngineeringRequest(
                 agent_name=config.name,
-                root_path=config.context_path,
-                max_token_hint=config.max_context_token_hint,
+                task=request.task,
+                agent_context_path=config.context_path,
+                repository_path=self._repository_path(request, config),
+                architecture_context=self._architecture_context(request),
+                upstream_context=self._upstream_context(request),
+                workflow_id=request.workflow_id,
+                thread_id=str(request.metadata.get("thread_id", "")) or None,
+                config=self._config_from_runtime(config),
             )
         )
-        return result.context.model_copy(
+        return engineered.context.model_copy(
             update={
                 "metadata": {
-                    **result.context.metadata,
-                    "context_warnings": result.warnings,
+                    **engineered.context.metadata,
+                    "context_warnings": engineered.warnings,
                     "requested_agent": request.agent_name,
+                    "context_engineering": {
+                        **engineered.metadata,
+                        "engineered": True,
+                        "selected_items": tuple(item.id for item in engineered.selected_items),
+                        "dropped_items": tuple(item.id for item in engineered.dropped_items),
+                        "token_hint": engineered.token_hint,
+                        "warnings": engineered.warnings,
+                    },
                 }
             }
         )
 
+    def _config_from_runtime(self, config: RuntimeAgentConfig) -> ContextEngineeringConfig:
+        return ContextEngineeringConfig(
+            max_token_hint=config.max_context_token_hint or 12_000,
+            reserved_output_token_hint=int(config.metadata.get("reserved_output_token_hint", 1_500)),
+            selected_repository_file_limit=int(config.metadata.get("selected_repository_file_limit", 12)),
+            repository_file_limit=int(config.metadata.get("repository_file_limit", 200)),
+            repository_file_token_soft_limit=int(config.metadata.get("repository_file_token_soft_limit", 900)),
+            repository_file_max_bytes=int(config.metadata.get("repository_file_max_bytes", 20_000)),
+        )
+
+    def _repository_path(
+        self,
+        request: AgentExecutionRequest,
+        config: RuntimeAgentConfig,
+    ) -> Path | None:
+        configured = (
+            request.metadata.get("repository_path")
+            or request.metadata.get("workspace_path")
+            or config.metadata.get("repository_path")
+        )
+        if configured:
+            return Path(str(configured))
+        try:
+            return config.context_path.parents[1]
+        except IndexError:
+            return None
+
+    def _architecture_context(self, request: AgentExecutionRequest) -> str | None:
+        direct = str(request.metadata.get("architecture_context", "")).strip()
+        if direct:
+            return direct
+        architecture_artifacts = [
+            artifact
+            for artifact in request.upstream_artifacts
+            if artifact.kind == ArtifactKind.ARCHITECTURE and artifact.content
+        ]
+        return "\n\n".join(str(artifact.content) for artifact in architecture_artifacts) or None
+
+    def _upstream_context(self, request: AgentExecutionRequest) -> tuple[str, ...]:
+        values: list[str] = []
+        for key in ("ba_stories", "architecture_context", "qa_results", "generated_outputs"):
+            value = str(request.metadata.get(key, "")).strip()
+            if value:
+                values.append(value)
+        for artifact in request.upstream_artifacts:
+            if artifact.content:
+                values.append(
+                    f"{artifact.kind.value} artifact from {artifact.producer_agent}: {artifact.name}\n"
+                    f"{artifact.content}"
+                )
+            else:
+                values.append(f"{artifact.kind.value} artifact from {artifact.producer_agent}: {artifact.name}")
+        return tuple(values)
+
 
 class GovernanceRuntimeContextAssembler(MarkdownRuleContextAssembler):
-    """Loads agent markdown context plus inherited governance policy metadata."""
+    """Builds dynamic engineered context plus inherited governance policy metadata."""
 
     def __init__(
         self,
         context_loader: FileSystemAgentContextLoader | None = None,
+        context_engineering_engine: ContextEngineeringEngine | None = None,
         governance_engine: AgentGovernanceEngine | None = None,
         agents_root: Path | None = None,
         standards_root: Path | None = None,
     ) -> None:
-        super().__init__(context_loader=context_loader)
+        super().__init__(
+            context_loader=context_loader,
+            context_engineering_engine=context_engineering_engine,
+        )
         self._governance_engine = governance_engine
         self._agents_root = agents_root
         self._standards_root = standards_root

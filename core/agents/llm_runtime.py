@@ -152,6 +152,7 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
             metadata={
                 "prompt_message_count": len(prompt_messages),
                 "context_document_count": agent_context.metadata.get("document_count", 0),
+                "context_engineering": agent_context.metadata.get("context_engineering", {}),
                 "structured_output": structured_output.model_dump(mode="json"),
                 **self.result_metadata(structured_output),
                 **self._repository_metadata(repository_result),
