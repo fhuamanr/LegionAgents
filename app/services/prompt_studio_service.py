@@ -31,6 +31,7 @@ class PromptStudioApplicationService:
 
     def __init__(self, service: PromptStudioService | None = None) -> None:
         self._service = service or PromptStudioService()
+        self._seeded = False
 
     async def save(self, request: PromptUpsertApiRequest) -> PromptResponse:
         prompt, version = await self._service.save(
@@ -54,6 +55,7 @@ class PromptStudioApplicationService:
         agent_name: str | None = None,
         status: str | None = None,
     ) -> PromptListResponse:
+        await self._seed_defaults()
         prompts = await self._service.list(
             scope=PromptScope(scope) if scope else None,
             agent_name=agent_name,
@@ -62,6 +64,7 @@ class PromptStudioApplicationService:
         return PromptListResponse(prompts=tuple(prompt.model_dump(mode="json") for prompt in prompts))
 
     async def get(self, prompt_id: UUID) -> PromptResponse:
+        await self._seed_defaults()
         prompt = await self._service.get(prompt_id)
         versions = await self._service.versions(prompt_id)
         latest = versions[-1] if versions else None
@@ -71,6 +74,7 @@ class PromptStudioApplicationService:
         )
 
     async def versions(self, prompt_id: UUID) -> PromptVersionListResponse:
+        await self._seed_defaults()
         versions = await self._service.versions(prompt_id)
         return PromptVersionListResponse(versions=tuple(version.model_dump(mode="json") for version in versions))
 
@@ -92,6 +96,7 @@ class PromptStudioApplicationService:
         return PromptPreviewResponse(preview=preview.model_dump(mode="json"))
 
     async def test(self, request: PromptTestApiRequest) -> PromptTestResponse:
+        await self._seed_defaults()
         result = await self._service.test(
             PromptTestRequest(
                 prompt_id=request.prompt_id,
@@ -105,5 +110,45 @@ class PromptStudioApplicationService:
         return PromptTestResponse(result=result.model_dump(mode="json"))
 
     async def compare(self, prompt_id: UUID, left_version: int, right_version: int) -> PromptComparisonResponse:
+        await self._seed_defaults()
         comparison = await self._service.compare_versions(prompt_id, left_version, right_version)
         return PromptComparisonResponse(comparison=comparison.model_dump(mode="json"))
+
+    async def _seed_defaults(self) -> None:
+        if self._seeded:
+            return
+        self._seeded = True
+        if await self._service.list():
+            return
+        for agent_name, role in (
+            ("ba", "business analyst"),
+            ("architect", "software architect"),
+            ("developer", "software developer"),
+            ("qa", "quality engineer"),
+            ("docs", "technical writer"),
+            ("pr", "pull request coordinator"),
+        ):
+            await self._service.save(
+                PromptUpsert(
+                    name=f"{agent_name} runtime prompt",
+                    scope=PromptScope.AGENT,
+                    agent_name=agent_name,
+                    markdown=(
+                        f"You are the {role} agent.\n\n"
+                        "Task: {{task}}\n\n"
+                        "Use the runtime governance context, uploaded files, repository references, and upstream artifacts. "
+                        "Return only the structured JSON required by this agent output contract."
+                    ),
+                    variables=(
+                        PromptVariable(
+                            name="task",
+                            description="Current workflow task or workspace message.",
+                            required=True,
+                            default="Deliver the requested software change.",
+                        ),
+                    ),
+                    status=PromptStatus.ACTIVE,
+                    updated_by="seed",
+                    change_summary="Seed editable MVP runtime prompt.",
+                )
+            )

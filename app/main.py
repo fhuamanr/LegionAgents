@@ -1,5 +1,10 @@
 """FastAPI application factory."""
 
+import logging
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI
 
 from app.middleware.request_id import RequestIdMiddleware
@@ -8,6 +13,7 @@ from app.routers import agents, approvals, chat, dashboard, executions, governan
 from app.dependencies.container import (
     get_approval_service,
     get_chat_service,
+    get_container,
     get_execution_service,
     get_observability_service,
     get_security_service,
@@ -18,6 +24,19 @@ from app.services.execution_service import ExecutionService
 from app.services.observability_service import ObservabilityApplicationService
 from app.websocket.routes import router as websocket_router
 
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    container = get_container()
+    await container.governance_management_service.ensure_seeded()
+    logger.info("config directory loaded: %s", Path.cwd())
+    logger.info("upload directory: %s", Path(os.getenv("UPLOAD_ROOT", "outputs/uploads")).resolve())
+    logger.info("artifact directory: %s", Path(os.getenv("STORAGE_ROOT", "outputs")).resolve())
+    logger.info("workspace directory: %s", Path(os.getenv("WORKSPACE_ROOT", "workflows")).resolve())
+    yield
+
 
 def create_app(execution_service: ExecutionService | None = None) -> FastAPI:
     """Create the FastAPI application."""
@@ -25,6 +44,7 @@ def create_app(execution_service: ExecutionService | None = None) -> FastAPI:
     app = FastAPI(
         title="Enterprise Multi-Agent Software Delivery Platform",
         version="0.1.0",
+        lifespan=lifespan,
     )
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(SecurityContextMiddleware, security_service=get_security_service())

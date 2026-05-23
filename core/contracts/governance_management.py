@@ -25,8 +25,18 @@ class GovernanceConfigKind(StrEnum):
     ANTI_GRAVITY = "anti_gravity"
     PERSONALITY = "personality"
     PROMPT = "prompt"
+    ARCHITECTURE = "architecture"
     CODING_STANDARDS = "coding_standards"
     QA_POLICY = "qa_policy"
+    SEVERITY_RULES = "severity_rules"
+    FORBIDDEN_RULES = "forbidden_rules"
+    NAMING_RULES = "naming_rules"
+    TESTING_RULES = "testing_rules"
+    SECURITY_RULES = "security_rules"
+    DOCUMENTATION_RULES = "documentation_rules"
+    WORKFLOW_RULES = "workflow_rules"
+    PR_RULES = "pr_rules"
+    OTHER = "other"
 
 
 class GovernanceReloadStatus(StrEnum):
@@ -48,6 +58,9 @@ class GovernanceConfigDocument(ContractBaseModel):
     agent_name: str | None = None
     version: int = Field(default=1, ge=1)
     source_path: Path | None = None
+    source_type: str = Field(default="runtime_created")
+    is_active: bool = True
+    protected: bool = False
     updated_by: str = Field(default="system", min_length=1)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

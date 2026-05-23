@@ -60,6 +60,39 @@ def test_provider_management_api_flags_incomplete_custom_provider() -> None:
     assert health.json()["checks"][0]["status"] == "warning"
 
 
+def test_provider_update_and_delete_prevent_duplicate_names() -> None:
+    client = _client()
+    create_first = client.post(
+        "/providers",
+        json={
+            "name": "OpenAI Primary",
+            "kind": "openai",
+            "api_key": "sk-first-key",
+            "default_model": "gpt-5-mini",
+        },
+    )
+    assert create_first.status_code == 201
+    provider_id = create_first.json()["provider"]["id"]
+
+    create_second = client.post(
+        "/providers",
+        json={
+            "name": "OpenAI Primary",
+            "kind": "openai",
+            "api_key": "sk-updated-key",
+            "default_model": "gpt-5",
+        },
+    )
+    assert create_second.status_code == 201
+    assert create_second.json()["provider"]["id"] == provider_id
+
+    listed = client.get("/providers").json()["providers"]
+    assert len([provider for provider in listed if provider["name"] == "OpenAI Primary"]) == 1
+
+    deleted = client.delete(f"/providers/{provider_id}")
+    assert deleted.status_code == 204
+
+
 def test_readiness_reports_provider_state() -> None:
     client = _client()
 

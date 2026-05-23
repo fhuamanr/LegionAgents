@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.dependencies.container import get_governance_management_service
 from app.schemas import (
@@ -66,3 +66,15 @@ async def rollback_governance_config(
     service: GovernanceManagementApplicationService = Depends(get_governance_management_service),
 ) -> GovernanceConfigResponse:
     return await service.rollback(document_id, request)
+
+
+@router.delete("/{document_id}", status_code=204)
+async def delete_governance_config(
+    document_id: UUID,
+    service: GovernanceManagementApplicationService = Depends(get_governance_management_service),
+) -> Response:
+    try:
+        await service.delete(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(status_code=204)

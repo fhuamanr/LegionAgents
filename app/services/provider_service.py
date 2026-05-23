@@ -25,6 +25,12 @@ class ProviderApplicationService:
 
     async def save(self, request: ProviderUpsertApiRequest, provider_id: UUID | None = None) -> ProviderResponse:
         existing = await self._registry.get(provider_id) if provider_id is not None else None
+        if existing is None and provider_id is None:
+            for provider in await self._registry.list():
+                if provider.name.strip().lower() == request.name.strip().lower():
+                    existing = provider
+                    provider_id = provider.id
+                    break
         provider = ProviderConfig(
             id=provider_id or uuid4(),
             name=request.name,
@@ -51,3 +57,6 @@ class ProviderApplicationService:
         return ProviderHealthResponse(
             checks=tuple(check.model_dump(mode="json") for check in await self._registry.health(provider_id))
         )
+
+    async def delete(self, provider_id: UUID) -> None:
+        await self._registry.delete(provider_id)

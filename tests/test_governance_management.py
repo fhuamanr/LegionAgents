@@ -1,4 +1,5 @@
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -8,14 +9,16 @@ from core.contracts.governance_management import (
     GovernanceConfigUpsert,
     GovernanceRollbackRequest,
 )
-from core.governance_management import FileGovernanceConfigRepository, GovernanceManagementService
+from core.governance_management import (
+    FileGovernanceConfigRepository,
+    GovernanceManagementService,
+    InMemoryGovernanceConfigRepository,
+)
 
 
 @pytest.mark.asyncio
 async def test_governance_management_versions_and_rolls_back() -> None:
-    storage = Path.cwd() / "outputs" / "governance_management_tests" / "configs.json"
-    if storage.exists():
-        storage.unlink()
+    storage = Path.cwd() / "outputs" / "governance_management_tests" / f"configs-{uuid4()}.json"
     service = GovernanceManagementService(repository=FileGovernanceConfigRepository(storage))
 
     first, first_version, first_reload = await service.save(
@@ -59,7 +62,7 @@ async def test_governance_management_versions_and_rolls_back() -> None:
 
 @pytest.mark.asyncio
 async def test_governance_management_lists_agent_specific_config() -> None:
-    service = GovernanceManagementService()
+    service = GovernanceManagementService(repository=InMemoryGovernanceConfigRepository())
     await service.save(
         GovernanceConfigUpsert(
             scope=GovernanceConfigScope.AGENT,

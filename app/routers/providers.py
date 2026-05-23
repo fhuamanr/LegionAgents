@@ -23,7 +23,10 @@ async def save_provider(
     request: ProviderUpsertApiRequest,
     service: ProviderApplicationService = Depends(get_provider_service),
 ) -> ProviderResponse:
-    return await service.save(request)
+    try:
+        return await service.save(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/health", response_model=ProviderHealthResponse)
@@ -50,7 +53,10 @@ async def update_provider(
     request: ProviderUpsertApiRequest,
     service: ProviderApplicationService = Depends(get_provider_service),
 ) -> ProviderResponse:
-    return await service.save(request, provider_id)
+    try:
+        return await service.save(request, provider_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{provider_id}/health", response_model=ProviderHealthResponse)
@@ -59,3 +65,11 @@ async def check_provider_health(
     service: ProviderApplicationService = Depends(get_provider_service),
 ) -> ProviderHealthResponse:
     return await service.health(provider_id)
+
+
+@router.delete("/{provider_id}", status_code=204)
+async def delete_provider(
+    provider_id: UUID,
+    service: ProviderApplicationService = Depends(get_provider_service),
+) -> None:
+    await service.delete(provider_id)

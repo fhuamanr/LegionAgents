@@ -11,14 +11,20 @@ import { PrSummaryPanel } from "@/features/pr/pr-summary-panel";
 import { QaReportViewer } from "@/features/qa/qa-report-viewer";
 import { LiveWorkflowVisualization } from "@/features/workflows/live-workflow-visualization";
 import { WorkflowMap } from "@/features/workflows/workflow-map";
-import { getDashboardSnapshot } from "@/lib/api";
+import { getDashboardSnapshot, getProviderManagementSnapshot } from "@/lib/api";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { ServerCog, TriangleAlert } from "lucide-react";
 
 export default async function DashboardPage(): Promise<JSX.Element> {
-  const snapshot = await getDashboardSnapshot();
+  const [snapshot, providers] = await Promise.all([getDashboardSnapshot(), getProviderManagementSnapshot()]);
+  const providerReady = providers.checks.some((check) => check.status === "ok");
 
   return (
     <AppShell>
       <div className="space-y-6">
+        {!providerReady ? <ProviderSetupBanner /> : null}
         <MetricStrip snapshot={snapshot} />
         <LiveWorkflowVisualization workflowId={snapshot.workflowId} snapshot={snapshot.visualization} />
         <WorkflowMap stages={snapshot.stages} />
@@ -39,5 +45,27 @@ export default async function DashboardPage(): Promise<JSX.Element> {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+function ProviderSetupBanner(): JSX.Element {
+  return (
+    <Card className="border-amber-500/40 bg-amber-500/10">
+      <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" aria-hidden="true" />
+          <div>
+            <div className="text-sm font-semibold">Configure an AI provider before running real workflows</div>
+            <p className="mt-1 text-xs text-muted-foreground">OpenAI/Codex, OpenRouter, Ollama, LM Studio, or a custom OpenAI-compatible endpoint is required for agent execution.</p>
+          </div>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/dashboard/providers" className="gap-2">
+            <ServerCog className="h-4 w-4" aria-hidden="true" />
+            Providers
+          </Link>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

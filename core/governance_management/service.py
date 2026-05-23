@@ -92,3 +92,8 @@ class GovernanceManagementService:
         """Return reload history."""
 
         return await self._reload_bus.history()
+
+    async def delete(self, document_id: UUID) -> None:
+        """Delete one governance document."""
+
+        await self._repository.delete(document_id)

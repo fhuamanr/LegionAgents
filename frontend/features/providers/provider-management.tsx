@@ -103,6 +103,11 @@ export function ProviderManagement({
                       ))
                     )}
                   </div>
+                  <div className="mt-4">
+                    <Button variant="destructive" size="sm" onClick={() => void deleteProvider(provider.id, setProviderItems, setHealthChecks, setMessage)}>
+                      Delete
+                    </Button>
+                  </div>
                 </div>
               ))
             )}
@@ -185,6 +190,31 @@ async function saveProvider(
     setMessage(`Provider save failed: ${error instanceof Error ? error.message : "unknown error"}`);
   } finally {
     setSaving(false);
+  }
+}
+
+async function deleteProvider(
+  providerId: string,
+  setProviderItems: (value: readonly LlmProviderSummary[]) => void,
+  setHealthChecks: (value: readonly LlmProviderHealthCheck[]) => void,
+  setMessage: (value: string | null) => void,
+): Promise<void> {
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (!apiBaseUrl) return;
+  try {
+    const response = await fetch(`${apiBaseUrl}/providers/${providerId}`, { method: "DELETE" });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    const [providersResponse, healthResponse] = await Promise.all([
+      fetch(`${apiBaseUrl}/providers`, { headers: { Accept: "application/json" } }),
+      fetch(`${apiBaseUrl}/providers/health`, { headers: { Accept: "application/json" } }),
+    ]);
+    const providersPayload = (await providersResponse.json()) as { providers: readonly Record<string, unknown>[] };
+    const healthPayload = (await healthResponse.json()) as { checks: readonly Record<string, unknown>[] };
+    setProviderItems(providersPayload.providers.map(normalizeProvider));
+    setHealthChecks(healthPayload.checks.map(normalizeProviderHealth));
+    setMessage("Provider deleted.");
+  } catch (error) {
+    setMessage(`Provider delete failed: ${error instanceof Error ? error.message : "unknown error"}`);
   }
 }
 

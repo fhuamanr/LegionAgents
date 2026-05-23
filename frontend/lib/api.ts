@@ -1,5 +1,16 @@
 import { normalizeWorkflowTelemetry } from "./realtime";
-import type { DashboardSnapshot, LlmProviderHealthCheck, LlmProviderSummary, WorkflowTelemetrySnapshot } from "./types";
+import type {
+  DashboardSnapshot,
+  GovernanceConfigDocument,
+  GovernanceConfigVersion,
+  LlmProviderHealthCheck,
+  LlmProviderSummary,
+  PromptDocument,
+  PromptTestSummary,
+  PromptVersion,
+  WorkspaceConversationSummary,
+  WorkflowTelemetrySnapshot,
+} from "./types";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -68,6 +79,75 @@ export async function getProviderManagementSnapshot(): Promise<{
   }
 }
 
+export async function getWorkspaceChatSnapshot(): Promise<readonly WorkspaceConversationSummary[]> {
+  if (!apiBaseUrl) {
+    return [];
+  }
+  try {
+    const response = await requestJson<{ conversations: readonly Record<string, unknown>[] }>("/workspace/chat/conversations");
+    return response.conversations.map(normalizeConversation);
+  } catch {
+    return [];
+  }
+}
+
+export async function getGovernanceManagementSnapshot(): Promise<{
+  documents: readonly GovernanceConfigDocument[];
+  versions: readonly GovernanceConfigVersion[];
+}> {
+  if (!apiBaseUrl) {
+    return { documents: [], versions: [] };
+  }
+  try {
+    const response = await requestJson<{ documents: readonly Record<string, unknown>[] }>("/governance/configs");
+    const documents = response.documents.map(normalizeGovernanceDocument);
+    const versions = (
+      await Promise.all(
+        documents.map(async (document) => {
+          try {
+            const versionResponse = await requestJson<{ versions: readonly Record<string, unknown>[] }>(`/governance/configs/${document.id}/versions`);
+            return versionResponse.versions.map(normalizeGovernanceVersion);
+          } catch {
+            return [];
+          }
+        }),
+      )
+    ).flat();
+    return { documents, versions };
+  } catch {
+    return { documents: [], versions: [] };
+  }
+}
+
+export async function getPromptStudioSnapshot(): Promise<{
+  prompts: readonly PromptDocument[];
+  versions: readonly PromptVersion[];
+  testResult: PromptTestSummary;
+}> {
+  if (!apiBaseUrl) {
+    return { prompts: [], versions: [], testResult: emptyDashboardSnapshot().promptStudio.testResult };
+  }
+  try {
+    const response = await requestJson<{ prompts: readonly Record<string, unknown>[] }>("/prompt-studio/prompts");
+    const prompts = response.prompts.map(normalizePromptDocument);
+    const versions = (
+      await Promise.all(
+        prompts.map(async (prompt) => {
+          try {
+            const versionResponse = await requestJson<{ versions: readonly Record<string, unknown>[] }>(`/prompt-studio/prompts/${prompt.id}/versions`);
+            return versionResponse.versions.map(normalizePromptVersion);
+          } catch {
+            return [];
+          }
+        }),
+      )
+    ).flat();
+    return { prompts, versions, testResult: emptyDashboardSnapshot().promptStudio.testResult };
+  } catch {
+    return { prompts: [], versions: [], testResult: emptyDashboardSnapshot().promptStudio.testResult };
+  }
+}
+
 function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {
   return {
     id: String(item.id),
@@ -89,6 +169,102 @@ function normalizeProviderHealth(item: Record<string, unknown>): LlmProviderHeal
     status: String(item.status) as LlmProviderHealthCheck["status"],
     message: String(item.message),
     checkedAt: String(item.checked_at ?? ""),
+  };
+}
+
+function normalizeConversation(item: Record<string, unknown>): WorkspaceConversationSummary {
+  const messages = Array.isArray(item.messages) ? item.messages as Record<string, unknown>[] : [];
+  const attachments = Array.isArray(item.attachments) ? item.attachments as Record<string, unknown>[] : [];
+  return {
+    id: String(item.id),
+    title: String(item.title),
+    updatedAt: String(item.updated_at ?? item.updatedAt ?? ""),
+    messages: messages.map((message) => ({
+      id: String(message.id),
+      role: String(message.role) as WorkspaceConversationSummary["messages"][number]["role"],
+      content: String(message.content ?? ""),
+      attachmentIds: Array.isArray(message.attachment_ids) ? message.attachment_ids.map(String) : [],
+      workflowId: message.workflow_id ? String(message.workflow_id) : undefined,
+      createdAt: String(message.created_at ?? ""),
+    })),
+    attachments: attachments.map((attachment) => ({
+      id: String(attachment.id),
+      kind: String(attachment.kind) as WorkspaceConversationSummary["attachments"][number]["kind"],
+      name: String(attachment.name),
+      uri: attachment.uri ? String(attachment.uri) : undefined,
+      path: attachment.path ? String(attachment.path) : undefined,
+      sizeBytes: Number(attachment.size_bytes ?? 0),
+    })),
+  };
+}
+
+function normalizeGovernanceDocument(item: Record<string, unknown>): GovernanceConfigDocument {
+  return {
+    id: String(item.id),
+    scope: String(item.scope) as GovernanceConfigDocument["scope"],
+    kind: String(item.kind) as GovernanceConfigDocument["kind"],
+    name: String(item.name),
+    markdown: String(item.markdown ?? ""),
+    agentName: item.agent_name ? String(item.agent_name) : undefined,
+    version: Number(item.version ?? 1),
+    updatedBy: String(item.updated_by ?? "system"),
+    updatedAt: String(item.updated_at ?? ""),
+    sourceType: item.source_type ? String(item.source_type) : undefined,
+    sourcePath: item.source_path ? String(item.source_path) : undefined,
+    isActive: Boolean(item.is_active ?? true),
+    protected: Boolean(item.protected ?? false),
+  };
+}
+
+function normalizeGovernanceVersion(item: Record<string, unknown>): GovernanceConfigVersion {
+  return {
+    id: String(item.id),
+    documentId: String(item.document_id),
+    version: Number(item.version ?? 1),
+    markdown: String(item.markdown ?? ""),
+    changedBy: String(item.changed_by ?? "system"),
+    changeSummary: item.change_summary ? String(item.change_summary) : undefined,
+    createdAt: String(item.created_at ?? ""),
+  };
+}
+
+function normalizePromptDocument(item: Record<string, unknown>): PromptDocument {
+  const variables = Array.isArray(item.variables) ? item.variables as Record<string, unknown>[] : [];
+  return {
+    id: String(item.id),
+    name: String(item.name),
+    scope: String(item.scope) as PromptDocument["scope"],
+    agentName: item.agent_name ? String(item.agent_name) : undefined,
+    markdown: String(item.markdown ?? ""),
+    variables: variables.map((variable) => ({
+      name: String(variable.name),
+      description: variable.description ? String(variable.description) : undefined,
+      required: Boolean(variable.required),
+      default: variable.default ? String(variable.default) : undefined,
+    })),
+    status: String(item.status) as PromptDocument["status"],
+    version: Number(item.version ?? 1),
+    updatedBy: String(item.updated_by ?? "system"),
+    updatedAt: String(item.updated_at ?? ""),
+  };
+}
+
+function normalizePromptVersion(item: Record<string, unknown>): PromptVersion {
+  const variables = Array.isArray(item.variables) ? item.variables as Record<string, unknown>[] : [];
+  return {
+    id: String(item.id),
+    promptId: String(item.prompt_id),
+    version: Number(item.version ?? 1),
+    markdown: String(item.markdown ?? ""),
+    variables: variables.map((variable) => ({
+      name: String(variable.name),
+      description: variable.description ? String(variable.description) : undefined,
+      required: Boolean(variable.required),
+      default: variable.default ? String(variable.default) : undefined,
+    })),
+    changedBy: String(item.changed_by ?? "system"),
+    changeSummary: item.change_summary ? String(item.change_summary) : undefined,
+    createdAt: String(item.created_at ?? ""),
   };
 }
 

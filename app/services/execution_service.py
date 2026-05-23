@@ -1,6 +1,7 @@
 """Execution application service."""
 
 import asyncio
+import os
 from datetime import datetime, timezone
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -80,7 +81,7 @@ class ExecutionService:
             "pr": "PR",
         }
         self._ingestion = StoryIngestionPipeline()
-        self._upload_root = Path("outputs/uploads").resolve()
+        self._upload_root = Path(os.getenv("UPLOAD_ROOT", "outputs/uploads")).resolve()
 
     async def upload_user_story(self, request: UserStoryUploadRequest) -> UploadResponse:
         upload = StoredUpload(
@@ -130,12 +131,13 @@ class ExecutionService:
         )
 
     async def trigger_workflow(self, request: TriggerWorkflowRequest) -> WorkflowResponse:
+        request = await self._hydrate_upload_context(request)
         workflow = await self._initialize_workflow(request)
         return await self._execute_workflow(workflow.workflow_id, request)
 
     async def trigger_workflow_live(self, request: TriggerWorkflowRequest) -> WorkflowResponse:
         """Start a workflow and return immediately for WebSocket subscribers."""
-
+        request = await self._hydrate_upload_context(request)
         workflow = await self._initialize_workflow(request)
         asyncio.create_task(self._execute_workflow(workflow.workflow_id, request))
         return workflow
@@ -639,3 +641,24 @@ class ExecutionService:
     def _safe_upload_name(self, file_name: str) -> str:
         cleaned = "".join(character if character.isalnum() or character in ".-_" else "-" for character in file_name)
         return cleaned.strip(".-") or "upload.txt"
+
+    async def _hydrate_upload_context(self, request: TriggerWorkflowRequest) -> TriggerWorkflowRequest:
+        if request.upload_id is None:
+            return request
+        upload = self._uploads.get(request.upload_id)
+        if upload is None and self._state_store is not None:
+            try:
+                payload = await self._state_store.get(bucket="uploads", document_id=request.upload_id)
+                upload = StoredUpload.model_validate(payload)
+                self._uploads[upload.upload_id] = upload
+            except KeyError:
+                upload = None
+        if upload is None:
+            return request
+        enriched_task = f"{request.task}\n\nUploaded context ({upload.title}):\n{upload.content[:4000]}"
+        return request.model_copy(
+            update={
+                "task": enriched_task,
+                "metadata": {**request.metadata, "upload_title": upload.title},
+            }
+        )

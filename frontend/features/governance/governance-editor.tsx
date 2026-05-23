@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { History, RotateCcw, Save, Settings2 } from "lucide-react";
+import { History, RotateCcw, Save, Search, Settings2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,12 +15,21 @@ export function GovernanceEditor({
   documents: readonly GovernanceConfigDocument[];
   versions: readonly GovernanceConfigVersion[];
 }>): JSX.Element {
+  const [items, setItems] = useState<readonly GovernanceConfigDocument[]>(documents);
+  const [history, setHistory] = useState<readonly GovernanceConfigVersion[]>(versions);
   const [selectedId, setSelectedId] = useState(documents[0]?.id ?? "");
-  const selected = documents.find((document) => document.id === selectedId) ?? documents[0];
+  const [notice, setNotice] = useState<string | null>(documents.length ? null : "No governance documents found yet. Use New to create the first editable policy.");
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const selected = items.find((document) => document.id === selectedId) ?? items[0];
   const [draft, setDraft] = useState(selected?.markdown ?? "");
   const selectedVersions = useMemo(
-    () => versions.filter((version) => version.documentId === selected?.id),
-    [selected?.id, versions],
+    () => history.filter((version) => version.documentId === selected?.id),
+    [selected?.id, history],
+  );
+  const filtered = useMemo(
+    () => items.filter((document) => `${document.name} ${document.kind} ${document.agentName ?? ""}`.toLowerCase().includes(query.toLowerCase())),
+    [items, query],
   );
 
   function selectDocument(document: GovernanceConfigDocument): void {
@@ -36,7 +45,15 @@ export function GovernanceEditor({
           <CardDescription>Global defaults and agent-specific configurations</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {documents.map((document) => (
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search documents" className="h-9 w-full rounded-md border bg-background pl-8 pr-3 text-sm" />
+          </label>
+          <Button variant="outline" className="w-full justify-start" disabled={busy} onClick={() => newDocument()}>
+            <Save className="h-4 w-4" aria-hidden="true" />
+            New governance document
+          </Button>
+          {filtered.map((document) => (
             <button
               key={document.id}
               type="button"
@@ -52,6 +69,7 @@ export function GovernanceEditor({
                 {document.agentName ? <Badge variant="default">{document.agentName}</Badge> : null}
               </div>
               <div className="mt-2 text-xs text-muted-foreground">v{document.version} / {formatDateTime(document.updatedAt)}</div>
+              <div className="mt-1 text-xs text-muted-foreground">{document.sourceType ?? "runtime_created"}{document.sourcePath ? ` / ${document.sourcePath}` : ""}</div>
             </button>
           ))}
         </CardContent>
@@ -66,16 +84,21 @@ export function GovernanceEditor({
                 <CardDescription>Markdown editor with live persistence and reload-ready metadata</CardDescription>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={() => void refreshDocuments()} disabled={busy}>
                   <Settings2 className="h-4 w-4" aria-hidden="true" />
                   Reload
                 </Button>
-                <Button size="sm">
+                <Button size="sm" onClick={() => void saveDocument()} disabled={busy || !selected}>
                   <Save className="h-4 w-4" aria-hidden="true" />
                   Save
                 </Button>
+                <Button variant="destructive" size="sm" onClick={() => void deleteDocument()} disabled={busy || !selected || selected.protected}>
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  Delete
+                </Button>
               </div>
             </div>
+            {notice ? <p className="mt-3 text-xs text-muted-foreground">{notice}</p> : null}
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 xl:grid-cols-2">
@@ -110,7 +133,7 @@ export function GovernanceEditor({
                     {version.changeSummary ?? "No summary"} / {version.changedBy} / {formatDateTime(version.createdAt)}
                   </p>
                 </div>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={() => void rollback(version.version)} disabled={busy}>
                   <RotateCcw className="h-4 w-4" aria-hidden="true" />
                   Rollback
                 </Button>
@@ -121,4 +144,158 @@ export function GovernanceEditor({
       </div>
     </div>
   );
+
+  function newDocument(): void {
+    const document: GovernanceConfigDocument = {
+      id: `new-${Date.now()}`,
+      scope: "global",
+      kind: "gravity",
+      name: "New Governance Rule",
+      markdown: "- Describe the rule here.",
+      version: 1,
+      updatedBy: "workspace-user",
+      updatedAt: new Date().toISOString(),
+    };
+    setItems((current) => [document, ...current]);
+    setSelectedId(document.id);
+    setDraft(document.markdown);
+    setNotice("Edit the new document and save it.");
+  }
+
+  async function deleteDocument(): Promise<void> {
+    if (!selected) return;
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/governance/configs/${selected.id}`, {method: "DELETE"});
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const remaining = items.filter((item) => item.id !== selected.id);
+      setItems(remaining);
+      setSelectedId(remaining[0]?.id ?? "");
+      setDraft(remaining[0]?.markdown ?? "");
+      setNotice("Document deleted.");
+    } catch (error) {
+      setNotice(`Delete failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveDocument(): Promise<void> {
+    if (!selected) return;
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) {
+      setNotice("NEXT_PUBLIC_API_BASE_URL is not configured.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/governance/configs`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json", Accept: "application/json"},
+        body: JSON.stringify({
+          scope: selected.scope,
+          kind: selected.kind,
+          name: selected.name,
+          markdown: draft,
+          agent_name: selected.agentName,
+          updated_by: "workspace-user",
+          change_summary: "Saved from Governance UI",
+        }),
+      });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const payload = await response.json() as { document: Record<string, unknown>; latest_version?: Record<string, unknown> };
+      const saved = normalizeGovernanceDocument(payload.document);
+      setItems((current) => [saved, ...current.filter((item) => item.id !== selected.id && item.id !== saved.id)]);
+      setSelectedId(saved.id);
+      if (payload.latest_version) {
+        const version = normalizeGovernanceVersion(payload.latest_version);
+        setHistory((current) => [version, ...current.filter((item) => item.id !== version.id)]);
+      }
+      setNotice("Governance document saved and runtime reload event emitted.");
+    } catch (error) {
+      setNotice(`Save failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rollback(version: number): Promise<void> {
+    if (!selected) return;
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/governance/configs/${selected.id}/rollback`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json", Accept: "application/json"},
+        body: JSON.stringify({target_version: version, updated_by: "workspace-user"}),
+      });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const payload = await response.json() as { document: Record<string, unknown>; latest_version?: Record<string, unknown> };
+      const rolledBack = normalizeGovernanceDocument(payload.document);
+      setItems((current) => current.map((item) => item.id === rolledBack.id ? rolledBack : item));
+      setDraft(rolledBack.markdown);
+      if (payload.latest_version) {
+        const newVersion = normalizeGovernanceVersion(payload.latest_version);
+        setHistory((current) => [newVersion, ...current]);
+      }
+      setNotice(`Rolled back to version ${version}.`);
+    } catch (error) {
+      setNotice(`Rollback failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshDocuments(): Promise<void> {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/governance/configs`, {headers: {Accept: "application/json"}});
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const payload = await response.json() as { documents: readonly Record<string, unknown>[] };
+      const refreshed = payload.documents.map(normalizeGovernanceDocument);
+      setItems(refreshed);
+      setSelectedId(refreshed[0]?.id ?? "");
+      setDraft(refreshed[0]?.markdown ?? "");
+      setNotice("Governance documents reloaded.");
+    } catch (error) {
+      setNotice(`Reload failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+}
+
+function normalizeGovernanceDocument(item: Record<string, unknown>): GovernanceConfigDocument {
+  return {
+    id: String(item.id),
+    scope: String(item.scope) as GovernanceConfigDocument["scope"],
+    kind: String(item.kind) as GovernanceConfigDocument["kind"],
+    name: String(item.name),
+    markdown: String(item.markdown ?? ""),
+    agentName: item.agent_name ? String(item.agent_name) : undefined,
+    version: Number(item.version ?? 1),
+    updatedBy: String(item.updated_by ?? "system"),
+    updatedAt: String(item.updated_at ?? ""),
+    sourceType: item.source_type ? String(item.source_type) : undefined,
+    sourcePath: item.source_path ? String(item.source_path) : undefined,
+    isActive: Boolean(item.is_active ?? true),
+    protected: Boolean(item.protected ?? false),
+  };
+}
+
+function normalizeGovernanceVersion(item: Record<string, unknown>): GovernanceConfigVersion {
+  return {
+    id: String(item.id),
+    documentId: String(item.document_id),
+    version: Number(item.version ?? 1),
+    markdown: String(item.markdown ?? ""),
+    changedBy: String(item.changed_by ?? "system"),
+    changeSummary: item.change_summary ? String(item.change_summary) : undefined,
+    createdAt: String(item.created_at ?? ""),
+  };
 }

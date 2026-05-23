@@ -50,6 +50,10 @@ class GovernanceConfigRepository(ABC):
     ) -> tuple[GovernanceConfigDocument, GovernanceConfigVersion]:
         """Restore a historical version."""
 
+    @abstractmethod
+    async def delete(self, document_id: UUID) -> None:
+        """Delete a document."""
+
 
 class InMemoryGovernanceConfigRepository(GovernanceConfigRepository):
     """In-memory governance config persistence."""
@@ -139,6 +143,10 @@ class InMemoryGovernanceConfigRepository(GovernanceConfigRepository):
         )
         return await self.upsert(request)
 
+    async def delete(self, document_id: UUID) -> None:
+        self._documents.pop(document_id, None)
+        self._versions.pop(document_id, None)
+
     def _find_existing(self, request: GovernanceConfigUpsert) -> GovernanceConfigDocument | None:
         for document in self._documents.values():
             if document.scope == request.scope and document.kind == request.kind and document.agent_name == request.agent_name:
@@ -169,6 +177,10 @@ class FileGovernanceConfigRepository(InMemoryGovernanceConfigRepository):
         result = await super().restore_version(document_id, target_version, updated_by, change_summary)
         self._persist()
         return result
+
+    async def delete(self, document_id: UUID) -> None:
+        await super().delete(document_id)
+        self._persist()
 
     def _load(self) -> None:
         if not self._storage_path.exists():
@@ -216,6 +228,10 @@ class PostgresGovernanceConfigRepository(GovernanceConfigRepository):
                 markdown=request.markdown,
                 agent_name=request.agent_name,
                 updated_by=request.updated_by,
+                source_path=Path(str(request.metadata.get("source_path"))) if request.metadata.get("source_path") else None,
+                source_type=str(request.metadata.get("source_type") or "runtime_created"),
+                is_active=bool(request.metadata.get("is_active", True)),
+                protected=bool(request.metadata.get("protected", False)),
                 metadata=request.metadata,
                 created_at=now,
                 updated_at=now,
@@ -308,6 +324,9 @@ class PostgresGovernanceConfigRepository(GovernanceConfigRepository):
                 metadata={**document.metadata, "rollback_from_version": document.version, "rollback_to_version": target_version},
             )
         )
+
+    async def delete(self, document_id: UUID) -> None:
+        await self._store.delete(bucket=self._documents_bucket, document_id=document_id)
 
     def _find_existing(
         self,

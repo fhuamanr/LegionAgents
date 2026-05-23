@@ -235,8 +235,18 @@ export type GovernanceConfigKind =
   | "anti_gravity"
   | "personality"
   | "prompt"
+  | "architecture"
   | "coding_standards"
-  | "qa_policy";
+  | "qa_policy"
+  | "severity_rules"
+  | "forbidden_rules"
+  | "naming_rules"
+  | "testing_rules"
+  | "security_rules"
+  | "documentation_rules"
+  | "workflow_rules"
+  | "pr_rules"
+  | "other";
 
 export interface GovernanceConfigDocument {
   readonly id: string;
@@ -248,6 +258,10 @@ export interface GovernanceConfigDocument {
   readonly version: number;
   readonly updatedBy: string;
   readonly updatedAt: string;
+  readonly sourceType?: string;
+  readonly sourcePath?: string;
+  readonly isActive?: boolean;
+  readonly protected?: boolean;
 }
 
 export interface GovernanceConfigVersion {

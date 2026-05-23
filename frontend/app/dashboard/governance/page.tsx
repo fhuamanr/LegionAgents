@@ -1,13 +1,13 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { GovernanceEditor } from "@/features/governance/governance-editor";
-import { getDashboardSnapshot } from "@/lib/api";
+import { getGovernanceManagementSnapshot } from "@/lib/api";
 
 export default async function GovernancePage(): Promise<JSX.Element> {
-  const snapshot = await getDashboardSnapshot();
+  const snapshot = await getGovernanceManagementSnapshot();
 
   return (
     <AppShell>
-      <GovernanceEditor documents={snapshot.governance.documents} versions={snapshot.governance.versions} />
+      <GovernanceEditor documents={snapshot.documents} versions={snapshot.versions} />
     </AppShell>
   );
 }

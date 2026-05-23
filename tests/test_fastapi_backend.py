@@ -266,3 +266,31 @@ def test_workspace_chat_api_uploads_references_and_triggers_workflow() -> None:
     assert events_response.status_code == 200
     event_types = {event["type"] for event in events_response.json()["events"]}
     assert {"attachment_uploaded", "workflow_triggered", "execution_progress"} <= event_types
+
+
+def test_governance_seed_loads_repository_markdown_documents() -> None:
+    client = _client()
+    first = client.get("/governance/configs")
+    second = client.get("/governance/configs")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_docs = first.json()["documents"]
+    second_docs = second.json()["documents"]
+    assert len(first_docs) > 10
+    assert len(second_docs) == len(first_docs)
+    assert any(doc["kind"] == "anti_gravity" for doc in first_docs)
+    assert any((doc.get("source_type") == "seeded_file") or (doc.get("metadata", {}).get("source_type") == "seeded_file") for doc in first_docs)
+
+
+def test_upload_files_api_supports_multiple_files() -> None:
+    client = _client()
+    response = client.post(
+        "/uploads/files",
+        files=[
+            ("files", ("story.md", b"# Story\nAs a user...", "text/markdown")),
+            ("files", ("requirements.txt", b"As a user I can upload.", "text/plain")),
+        ],
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert len(payload) == 2

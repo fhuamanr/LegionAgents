@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, NAMESPACE_URL, uuid4, uuid5
 
 from pydantic import BaseModel, Field
 
@@ -157,6 +157,12 @@ class ProviderRegistry:
             checks.append(_provider_health(provider))
         return tuple(checks)
 
+    async def delete(self, provider_id: UUID) -> None:
+        await self._ensure_seeded()
+        self._providers.pop(provider_id, None)
+        if self._store is not None:
+            await self._store.delete(bucket=self._bucket, document_id=provider_id)
+
     async def _ensure_seeded(self) -> None:
         if self._seeded:
             return
@@ -231,6 +237,7 @@ def _providers_from_environment() -> tuple[ProviderConfig, ...]:
         providers.append(
             ProviderConfig(
                 name="OpenAI",
+                id=_stable_provider_id("openai"),
                 kind=ProviderKind.OPENAI,
                 api_key=openai_key,
                 base_url=os.getenv("OPENAI_BASE_URL") or None,
@@ -242,6 +249,7 @@ def _providers_from_environment() -> tuple[ProviderConfig, ...]:
         providers.append(
             ProviderConfig(
                 name="OpenRouter",
+                id=_stable_provider_id("openrouter"),
                 kind=ProviderKind.OPENROUTER,
                 api_key=openrouter_key,
                 base_url=os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1",
@@ -253,6 +261,7 @@ def _providers_from_environment() -> tuple[ProviderConfig, ...]:
         providers.append(
             ProviderConfig(
                 name="Ollama",
+                id=_stable_provider_id("ollama"),
                 kind=ProviderKind.OLLAMA,
                 base_url=ollama_url.rstrip("/") + "/v1",
                 default_model=os.getenv("OLLAMA_MODEL") or "llama3.1",
@@ -263,6 +272,7 @@ def _providers_from_environment() -> tuple[ProviderConfig, ...]:
         providers.append(
             ProviderConfig(
                 name="LM Studio",
+                id=_stable_provider_id("lm_studio"),
                 kind=ProviderKind.LM_STUDIO,
                 base_url=lm_studio_url.rstrip("/") + "/v1",
                 default_model=os.getenv("LM_STUDIO_MODEL") or "local-model",
@@ -273,6 +283,7 @@ def _providers_from_environment() -> tuple[ProviderConfig, ...]:
         providers.append(
             ProviderConfig(
                 name=os.getenv("OPENAI_COMPATIBLE_PROVIDER_NAME") or "Custom OpenAI Compatible",
+                id=_stable_provider_id("custom"),
                 kind=ProviderKind.CUSTOM,
                 api_key=os.getenv("OPENAI_COMPATIBLE_API_KEY"),
                 base_url=custom_url,
@@ -294,3 +305,7 @@ def _agent_name_from_messages(messages: tuple[PromptMessage, ...]) -> str | None
         after = message.content.split(marker, 1)[1].strip()
         return after.split(".", 1)[0].strip()
     return None
+
+
+def _stable_provider_id(name: str) -> UUID:
+    return uuid5(NAMESPACE_URL, f"provider:{name}")
