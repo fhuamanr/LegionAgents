@@ -30,6 +30,31 @@ class HealthResponse(ApiModel):
     service: str
 
 
+class ProviderUpsertApiRequest(ApiModel):
+    name: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    base_url: str | None = None
+    api_key: str | None = None
+    default_model: str = Field(min_length=1)
+    status: str = Field(default="active", min_length=1)
+    agent_models: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: float | None = 60
+    headers: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProviderResponse(ApiModel):
+    provider: dict[str, Any]
+
+
+class ProviderListResponse(ApiModel):
+    providers: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class ProviderHealthResponse(ApiModel):
+    checks: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
 class UserStoryUploadRequest(ApiModel):
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)

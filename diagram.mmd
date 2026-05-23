@@ -10,6 +10,7 @@ flowchart TB
   API --> Chat["Workspace Chat"]
   API --> PromptStudio["Prompt Studio"]
   API --> GovernanceEditor["Governance Editor"]
+  API --> Providers["Provider Management"]
   API --> WorkspaceConfig["Workspace + Agent Config"]
   API --> Graph["LangGraph Execution Runtime"]
   API --> Observability["Logs / Metrics / Telemetry"]
@@ -19,6 +20,7 @@ flowchart TB
   Persistence --> PromptVersions["Prompt Versions + Rollback"]
   Persistence --> GovernanceVersions["Governance Versions + Rollback"]
   Persistence --> WorkspaceRecords["Workspaces / Projects / Agent Config"]
+  Persistence --> ProviderRecords["LLM Provider Configs"]
   Persistence --> UploadRecords["Upload Metadata"]
 
   Uploads --> Ingestion["Story Ingestion Pipeline"]
@@ -43,7 +45,8 @@ flowchart TB
   Runtime --> GovernanceEngine["Governance Engine"]
   Runtime --> OutputValidation["Structured Output Validation"]
   Runtime --> TokenCallback["Token Streaming Callback"]
-  Runtime --> LLM["OpenAI / Compatible LLM"]
+  Runtime --> ProviderRegistry["Provider Registry + Model Routing"]
+  ProviderRegistry --> LLM["OpenAI / OpenRouter / Ollama / LM Studio / Custom Compatible LLM"]
 
   ContextEngineering --> RepoSummary["Repository Summary"]
   ContextEngineering --> SemanticFiles["Semantic File Selection"]
@@ -55,6 +58,9 @@ flowchart TB
   GovernanceEngine --> RuntimeValidation["Runtime + Output Validation"]
   GovernanceEngine --> ArchitectureRules["Architecture Enforcement"]
   RuntimeValidation -->|reject invalid output| Graph
+
+  Providers --> ProviderRegistry
+  Providers --> ProviderRecords
 
   Developer --> RepoRuntime["Repository Runtime"]
   RepoRuntime --> Git["Clone / Branch / Modify / Diff / Commit"]

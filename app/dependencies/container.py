@@ -9,8 +9,10 @@ from app.services.observability_service import ObservabilityApplicationService
 from app.services.governance_management_service import GovernanceManagementApplicationService
 from app.services.chat_service import WorkspaceChatApplicationService
 from app.services.prompt_studio_service import PromptStudioApplicationService
+from app.services.provider_service import ProviderApplicationService
 from app.services.workspace_management_service import WorkspaceManagementApplicationService
 from app.services.security_service import SecurityApplicationService
+from core.agents.providers import ProviderRegistry, RoutingModelClient
 from core.graph import PostgresWorkflowExecutionRepository
 from core.governance_management import GovernanceManagementService, PostgresGovernanceConfigRepository
 from core.persistence import PostgresJsonDocumentStore
@@ -43,7 +45,10 @@ class AppContainer:
             if postgres_store is not None
             else None
         )
+        self.provider_registry = ProviderRegistry(postgres_store)
+        self.provider_service = ProviderApplicationService(self.provider_registry)
         self.execution_service = ExecutionService(
+            model_client=RoutingModelClient(self.provider_registry),
             workflow_repository=workflow_repository,
             state_store=postgres_store,
         )
@@ -101,6 +106,10 @@ def get_chat_service() -> WorkspaceChatApplicationService:
 
 def get_prompt_studio_service() -> PromptStudioApplicationService:
     return get_container().prompt_studio_service
+
+
+def get_provider_service() -> ProviderApplicationService:
+    return get_container().provider_service
 
 
 def get_workspace_management_service() -> WorkspaceManagementApplicationService:

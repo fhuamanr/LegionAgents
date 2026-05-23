@@ -11,8 +11,8 @@ from core.agents.runtime import AgentModelClient
 from core.contracts.prompts import PromptMessage
 
 
-class OpenAIChatModelClient(AgentModelClient):
-    """OpenAI chat-completions client used by executable agents."""
+class OpenAICompatibleChatModelClient(AgentModelClient):
+    """OpenAI-compatible chat-completions client used by executable agents."""
 
     def __init__(
         self,
@@ -22,16 +22,18 @@ class OpenAIChatModelClient(AgentModelClient):
         base_url: str | None = None,
         timeout_seconds: float | None = None,
         response_format: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         resolved_api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not resolved_api_key:
-            raise ValueError("OPENAI_API_KEY is required for real OpenAI agent execution.")
+            raise ValueError("An API key or local provider token is required for real agent execution.")
         self._model = model or os.getenv("OPENAI_CODEX_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-5"
         self._response_format = response_format or {"type": "json_object"}
         self._client = AsyncOpenAI(
             api_key=resolved_api_key,
             base_url=base_url or os.getenv("OPENAI_BASE_URL") or None,
             timeout=timeout_seconds,
+            default_headers=headers,
         )
 
     async def complete(self, messages: tuple[PromptMessage, ...]) -> str:
@@ -66,3 +68,6 @@ class OpenAIChatModelClient(AgentModelClient):
             delta = chunk.choices[0].delta.content
             if delta:
                 yield delta
+
+
+OpenAIChatModelClient = OpenAICompatibleChatModelClient

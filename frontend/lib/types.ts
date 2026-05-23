@@ -313,6 +313,29 @@ export interface PromptTestSummary {
   readonly evaluation: PromptEvaluationSummary;
 }
 
+export type LlmProviderKind = "openai" | "cursor" | "openrouter" | "ollama" | "lm_studio" | "local" | "custom";
+export type LlmProviderStatus = "active" | "disabled";
+
+export interface LlmProviderSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: LlmProviderKind;
+  readonly baseUrl?: string;
+  readonly apiKey?: string;
+  readonly defaultModel: string;
+  readonly status: LlmProviderStatus;
+  readonly agentModels: Record<string, string>;
+  readonly configured: boolean;
+  readonly updatedAt: string;
+}
+
+export interface LlmProviderHealthCheck {
+  readonly providerId: string;
+  readonly status: "ok" | "warning" | "failed" | "disabled";
+  readonly message: string;
+  readonly checkedAt: string;
+}
+
 export type ChatRole = "user" | "assistant" | "system" | "workflow";
 
 export type WorkspaceAttachmentKind =

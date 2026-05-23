@@ -2,7 +2,9 @@
 
 All notable architecture increments for the Enterprise Multi-Agent Software Delivery Platform are tracked here.
 
-## Unreleased
+## v0.1.0-alpha - 2026-05-23
+
+First public alpha release focused on turning Legion Agents into a real MVP: configurable, demonstrable, observable, and usable end to end.
 
 ### Current Operational Status
 
@@ -12,13 +14,18 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 - Wired active Prompt Studio documents into runtime agent context so prompt edits can affect subsequent executions without restarting.
 - Wired runtime-edited governance documents into the effective policy so global and agent rule edits participate in inheritance, prompt generation, runtime validation, output validation, and execution rejection.
 - Added file upload ingestion for markdown, txt, DOCX, and PDF inputs through the backend upload API.
+- Added configurable multi-provider LLM runtime support with OpenAI-compatible routing for OpenAI/Codex, Cursor-compatible APIs, OpenRouter, Ollama, LM Studio, local providers, and custom endpoints.
+- Added provider registry persistence, masked API key responses, provider health checks, readiness checks, runtime model overrides, and agent-specific model selection.
+- Added provider management UI at `/dashboard/providers` plus `/providers` and `/providers/health` APIs.
 - Updated root Mermaid architecture to reflect real PostgreSQL persistence, runtime prompt/governance reload behavior, and the real LangGraph worker.
+- Updated root Mermaid architecture to show provider management, provider persistence, runtime provider registry, and multi-provider model routing.
 - Added Apache License 2.0 project licensing.
 
 ### Currently Working
 
 - Real `BA -> Architect -> Developer -> QA -> Docs -> PR` workflow execution through LangGraph.
-- Real OpenAI model execution with structured outputs, retries, token streaming, and generated output events.
+- Real multi-provider model execution with structured outputs, retries, token streaming, and generated output events.
+- Real provider configuration from environment variables, UI, and backend APIs.
 - Real repository modification path for cloning, branching, applying generated changes, diffing, committing, and preparing PR artifacts.
 - Real QA runtime contracts, sandbox boundaries, logs, screenshots, and evidence artifacts when local sandbox services are available.
 - Real live workflow visualization from backend snapshots and WebSocket event streams.
@@ -99,5 +106,6 @@ All notable architecture increments for the Enterprise Multi-Agent Software Deli
 ### Verified
 
 - Backend suite: `89 passed`.
+- Focused provider/API workflow suite: passed.
 - Frontend typecheck: passed.
 - Docker Compose configuration and deployment assets validated structurally.

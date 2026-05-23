@@ -1,5 +1,5 @@
 import { normalizeWorkflowTelemetry } from "./realtime";
-import type { DashboardSnapshot, WorkflowTelemetrySnapshot } from "./types";
+import type { DashboardSnapshot, LlmProviderHealthCheck, LlmProviderSummary, WorkflowTelemetrySnapshot } from "./types";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -44,6 +44,52 @@ export async function getWorkflowTelemetry(workflowId: string): Promise<Workflow
   } catch {
     return emptyDashboardSnapshot().visualization;
   }
+}
+
+export async function getProviderManagementSnapshot(): Promise<{
+  providers: readonly LlmProviderSummary[];
+  checks: readonly LlmProviderHealthCheck[];
+}> {
+  if (!apiBaseUrl) {
+    return { providers: [], checks: [] };
+  }
+
+  try {
+    const [providersResponse, healthResponse] = await Promise.all([
+      requestJson<{ providers: readonly Record<string, unknown>[] }>("/providers"),
+      requestJson<{ checks: readonly Record<string, unknown>[] }>("/providers/health"),
+    ]);
+    return {
+      providers: providersResponse.providers.map(normalizeProvider),
+      checks: healthResponse.checks.map(normalizeProviderHealth),
+    };
+  } catch {
+    return { providers: [], checks: [] };
+  }
+}
+
+function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {
+  return {
+    id: String(item.id),
+    name: String(item.name),
+    kind: String(item.kind) as LlmProviderSummary["kind"],
+    baseUrl: item.base_url ? String(item.base_url) : undefined,
+    apiKey: item.api_key ? String(item.api_key) : undefined,
+    defaultModel: String(item.default_model ?? ""),
+    status: String(item.status) as LlmProviderSummary["status"],
+    agentModels: (item.agent_models ?? {}) as Record<string, string>,
+    configured: Boolean(item.configured),
+    updatedAt: String(item.updated_at ?? ""),
+  };
+}
+
+function normalizeProviderHealth(item: Record<string, unknown>): LlmProviderHealthCheck {
+  return {
+    providerId: String(item.provider_id),
+    status: String(item.status) as LlmProviderHealthCheck["status"],
+    message: String(item.message),
+    checkedAt: String(item.checked_at ?? ""),
+  };
 }
 
 function emptyDashboardSnapshot(): DashboardSnapshot {

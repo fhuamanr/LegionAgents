@@ -7,9 +7,11 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688.svg)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Next.js-Dashboard-000000.svg)](https://nextjs.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-1C3C3C.svg)](https://www.langchain.com/langgraph)
-[![Status](https://img.shields.io/badge/status-active%20platform%20evolution-brightgreen.svg)](#roadmap)
+[![Status](https://img.shields.io/badge/status-alpha%20release-brightgreen.svg)](#current-status)
 
-Legion Agents is a serious attempt to model how modern software delivery could work when AI agents are not treated as isolated chatbots, but as governed collaborators inside a real engineering system.
+Legion Agents is now entering its first public alpha release: a working MVP for governed, observable AI software delivery workflows.
+
+It is a serious attempt to model how modern software delivery could work when AI agents are not treated as isolated chatbots, but as governed collaborators inside a real engineering system.
 
 It brings together specialized AI agents, architecture standards, context engineering, runtime governance, repository modification, QA validation, prompt management, observability, and live workflow visualization into one evolving platform.
 
@@ -33,6 +35,7 @@ This project is not a toy agent demo. It is an AI-native SDLC foundation designe
 - [Autonomous QA System](#autonomous-qa-system)
 - [Live Observability](#live-observability)
 - [Prompt Engineering Studio](#prompt-engineering-studio)
+- [Provider Configuration](#provider-configuration)
 - [Multi-Agent Orchestration](#multi-agent-orchestration)
 - [Docker Compose Quick Start](#docker-compose-quick-start)
 - [Screenshots](#screenshots)
@@ -154,7 +157,7 @@ AI workflows must be inspectable while they run. The platform streams logs, agen
 - **Live workflow visualization:** WebSocket event streams, telemetry snapshots, logs, retries, tokens, and generated outputs
 - **Prompt Engineering Studio:** prompt editing, variable injection, testing, versioning, rollback, comparison, and token estimation
 - **Editable governance:** global and agent rules, version history, rollback, reload events, and runtime policy inclusion
-- **PostgreSQL-backed persistence:** workflow records, checkpoints, uploads, prompts, governance, workspaces, and agent configuration
+- **PostgreSQL-backed persistence:** workflow records, checkpoints, uploads, prompts, governance, workspaces, providers, and agent configuration
 - **Enterprise-ready architecture:** typed contracts, clean boundaries, audit hooks, security foundations, isolated workspaces, Docker Compose topology
 
 ---
@@ -173,6 +176,7 @@ flowchart TB
   API --> PromptStudio["Prompt Engineering Studio"]
   API --> GovernanceEditor["Governance Editor"]
   API --> Workspaces["Workspace + Agent Config"]
+  API --> Providers["Provider Management"]
   API --> Graph["LangGraph Runtime"]
   API --> Persistence["PostgreSQL JSONB Persistence"]
   API --> Observability["Observability + Audit"]
@@ -181,6 +185,7 @@ flowchart TB
   Persistence --> PromptVersions["Prompt Versions"]
   Persistence --> GovernanceVersions["Governance Versions"]
   Persistence --> WorkspaceRecords["Workspace / Project / Agent Config"]
+  Persistence --> ProviderRecords["LLM Provider Configs"]
 
   Uploads --> Ingestion["Story Ingestion Pipeline"]
   Chat --> Graph
@@ -190,7 +195,8 @@ flowchart TB
   Runtime --> Context["Context Engineering"]
   Runtime --> Governance["Governance Engine"]
   Runtime --> Validation["Structured Output Validation"]
-  Runtime --> LLM["OpenAI / Compatible LLM"]
+  Runtime --> ProviderRegistry["Provider Registry"]
+  ProviderRegistry --> LLM["OpenAI / OpenRouter / Ollama / LM Studio / Custom Compatible LLM"]
 
   Governance --> PromptRules["Policy Injection"]
   Governance --> OutputRules["Runtime Output Validation"]
@@ -486,6 +492,58 @@ Prompts are treated as versioned operational assets. When active prompts are sav
 
 ---
 
+## Provider Configuration
+
+Legion Agents is not hardcoded to one model provider. The runtime uses a provider registry with OpenAI-compatible clients, masked API key responses, provider health checks, runtime model overrides, and agent-specific model routing.
+
+Supported MVP provider modes:
+
+- OpenAI / Codex through `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL`
+- OpenRouter through `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, and `OPENROUTER_MODEL`
+- Ollama through `OLLAMA_BASE_URL` and `OLLAMA_MODEL`
+- LM Studio through `LM_STUDIO_BASE_URL` and `LM_STUDIO_MODEL`
+- Cursor-compatible or custom OpenAI-compatible endpoints through `OPENAI_COMPATIBLE_*`
+
+From the UI, open:
+
+```text
+http://127.0.0.1:8080/dashboard/providers
+```
+
+From the API:
+
+```powershell
+curl -X POST http://127.0.0.1:8080/api/providers `
+  -H "Content-Type: application/json" `
+  -d "{\"name\":\"OpenRouter\",\"kind\":\"openrouter\",\"base_url\":\"https://openrouter.ai/api/v1\",\"api_key\":\"$env:OPENROUTER_API_KEY\",\"default_model\":\"openai/gpt-4o-mini\",\"agent_models\":{\"developer\":\"anthropic/claude-3.5-sonnet\"}}"
+```
+
+Workflow requests can override routing with metadata:
+
+```json
+{
+  "task": "Implement the uploaded story",
+  "metadata": {
+    "provider_id": "provider-uuid",
+    "model": "openai/gpt-4o-mini",
+    "agent_models": {
+      "developer": "anthropic/claude-3.5-sonnet",
+      "qa": "openai/gpt-4o-mini"
+    }
+  }
+}
+```
+
+Check readiness before a demo:
+
+```powershell
+curl http://127.0.0.1:8080/api/providers/health
+```
+
+At least one active provider must be configured for real LLM execution.
+
+---
+
 ## Multi-Agent Orchestration
 
 Legion Agents uses LangGraph to coordinate specialized AI roles.
@@ -533,7 +591,16 @@ Selenium grid:   http://127.0.0.1:4444
 Set your model credentials for real agent execution:
 
 ```powershell
-setx OPENAI_API_KEY "your-api-key"
+notepad .env.compose
+```
+
+Fill at least one provider section, for example `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL`, `LM_STUDIO_BASE_URL`, or a custom `OPENAI_COMPATIBLE_BASE_URL`. You can also add or update providers from `/dashboard/providers` after the stack starts.
+
+Validate provider readiness:
+
+```powershell
+curl http://127.0.0.1:8080/api/providers/health
+curl http://127.0.0.1:8080/api/health/readiness
 ```
 
 Stop:
@@ -585,15 +652,15 @@ Screenshots and hosted demos are welcome contributions.
 A typical local demo flow:
 
 1. Start the Docker Compose stack.
-2. Open the dashboard.
-3. Upload a markdown, txt, DOCX, or PDF requirements document.
-4. Start a workflow from the AI Workspace.
-5. Watch the live graph execute `BA -> Architect -> Developer -> QA -> Docs -> PR`.
-6. Inspect streamed tokens, logs, outputs, retries, and QA evidence.
-7. Edit a governance rule.
-8. Re-run the workflow and observe the changed runtime behavior.
-9. Edit an active prompt in Prompt Studio.
-10. Re-run an agent and inspect the new prompt context and output.
+2. Open `/dashboard/providers` and confirm at least one provider health check is `ok`.
+3. Open the AI Workspace.
+4. Upload a markdown, txt, DOCX, or PDF requirements document, or type a request directly.
+5. Add a Git repository URL when the workflow should clone, modify, diff, commit, and prepare PR artifacts.
+6. Start a workflow from the chat.
+7. Watch the live graph execute `BA -> Architect -> Developer -> QA -> Docs -> PR`.
+8. Inspect streamed tokens, logs, outputs, retries, generated docs, QA evidence, and PR artifacts.
+9. Edit a governance rule, roll it back if needed, and re-run the workflow.
+10. Edit an active prompt in Prompt Studio, preview/test it with variables, and re-run an agent.
 
 ---
 
@@ -681,10 +748,14 @@ The local stack includes frontend, backend, worker, PostgreSQL, Redis, Qdrant, M
 
 ## Current Status
 
+Alpha release status: `v0.1.0-alpha`.
+
 Working today:
 
 - real LangGraph workflow execution
-- real OpenAI-backed structured agent runtime
+- real multi-provider structured agent runtime
+- real provider management UI and API
+- real provider health and readiness checks
 - real token streaming
 - real workflow visualization
 - real repository modification path
@@ -698,6 +769,7 @@ Working today:
 
 Known limitations:
 
+- Alpha release APIs and UI surfaces may still change before beta.
 - Hosted GitHub/GitLab PR creation is not implemented yet; local PR artifacts are prepared.
 - Durable multi-process event streaming should move to Redis Streams or persisted event replay.
 - Jira and Notion ingestion adapters are backlog items.
@@ -819,7 +891,7 @@ tests/                   Backend foundation and runtime tests
 
 ## About the Builder
 
-**Fausto Huaman Rengifo**
+**Fausto**
 
 Legion Agents is a personal-time, long-term AI engineering and platform experiment built by a real engineer who has spent a lot of time thinking about software delivery, architecture boundaries, QA loops, team collaboration, and how AI systems should behave when the work gets serious.
 
