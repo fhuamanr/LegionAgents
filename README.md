@@ -817,13 +817,27 @@ tests/                   Backend foundation and runtime tests
 
 ---
 
-## Author
+## About the Builder
 
-**Fausto Huaman **
+**Fausto Huaman Rengifo**
 
-Legion Agents was created from a personal need to build a complete, AI-driven software delivery platform inspired by real software engineering collaboration.
+Legion Agents is a personal-time, long-term AI engineering and platform experiment built by a real engineer who has spent a lot of time thinking about software delivery, architecture boundaries, QA loops, team collaboration, and how AI systems should behave when the work gets serious.
 
-The project is intended to grow in the open with engineers, architects, QA specialists, AI builders, and platform teams interested in the future of governed AI-native software delivery.
+I have been a programming enthusiast since childhood, and I still carry that same curiosity into the way I build software today. I am a platform engineering nerd, a wannabe tech lead in the best possible sense, a proud father, and someone who enjoys chasing the shape of systems until they start to feel coherent.
+
+This project comes from that mix: professional software delivery experience, curiosity about AI agents, appreciation for the people I have worked with, and a slightly stubborn belief that AI engineering should be more structured, observable, governed, and human than a pile of prompts.
+
+It is also intentionally open-source. Fork it, break it, question it, extend it, argue with the architecture, improve the prompts, add integrations, replace pieces, or use it as a playground for your own AI delivery experiments.
+
+## Acknowledgements
+
+This project exists because software is never really built alone.
+
+Thank you to **Katy**, **Cris**, and **Cristhian** for the conversations, support, ideas, and real-world engineering context that shaped how I think about collaboration and delivery.
+
+A special thank-you to my wife, for the patience while I kept building this platform during personal time, late nights, and many "just one more thing" moments.
+
+And to my daughter: you are the inspiration behind everything. This project carries a little bit of the future I hope to help build for you.
 
 ---
 
@@ -831,8 +845,25 @@ The project is intended to grow in the open with engineers, architects, QA speci
 
 - Email: [fhuamanr@gmail.com](mailto:fhuamanr@gmail.com)
 - Email: [chuamanr@icloud.com](mailto:chuamanr@icloud.com)
-- [![LinkedIn](https://img.shields.io/badge/LinkedIn-Carlos%20Huaman%20Rengifo-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/carloshuamanrengifo)
-- [![GitHub](https://img.shields.io/badge/GitHub-fhuamanr-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/fhuamanr)
+- LinkedIn: [carloshuamanrengifo](https://www.linkedin.com/in/carloshuamanrengifo)
+- GitHub: [fhuamanr](https://github.com/fhuamanr)
+
+I am always happy to connect with people interested in software engineering, AI systems, platform architecture, QA automation, developer tools, and open-source collaboration.
+
+## Closing Note
+
+If you are in Lima, Peru and want to grab a coffee to talk about:
+
+- software engineering
+- AI
+- football
+- videogames
+- platform architecture
+- or just nerd stuff in general
+
+feel free to reach out.
+
+Legion Agents is still evolving, and that is the point. It is a serious engineering platform, but it is also an invitation to explore what AI-native software delivery can become when builders bring curiosity, discipline, and community into the same room.
 
 
 ---
