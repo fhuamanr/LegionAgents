@@ -8,6 +8,9 @@ First public alpha release focused on turning Legion Agents into a real MVP: con
 
 ### Current Operational Status
 
+- Added alpha stabilization recovery for governance preload breadth, provider CRUD reliability, multi-file upload handling, and workflow context hydration from uploaded documents.
+- Added startup seeding/logging behavior so governance markdown documents are discovered and seeded deterministically from mounted repository paths.
+- Added an end-to-end MVP demo verifier script (`scripts/mvp_demo_verifier.py`) that validates health/readiness, governance edit/versioning, provider CRUD, upload, chat-triggered workflow, execution logs, and report generation.
 - Converted platform persistence from local-only defaults to PostgreSQL-backed production adapters for workflow executions/checkpoints, API workflow/upload state, Prompt Studio documents and versions, governance documents and versions, workspaces, projects, and workspace agent configuration.
 - Added a shared PostgreSQL JSONB document store adapter used by production repositories while preserving in-memory implementations for focused tests.
 - Replaced the Docker Compose LangGraph worker placeholder with a real `core.graph.worker` process that recovers persisted running workflow executions.
@@ -105,6 +108,7 @@ First public alpha release focused on turning Legion Agents into a real MVP: con
 
 ### Verified
 
+- Alpha MVP verifier tests: governance seed/idempotency, provider CRUD regression, and multi-file upload API checks passed.
 - Backend suite: `89 passed`.
 - Focused provider/API workflow suite: passed.
 - Frontend typecheck: passed.

@@ -40,6 +40,7 @@ This project is not a toy agent demo. It is an AI-native SDLC foundation designe
 - [Docker Compose Quick Start](#docker-compose-quick-start)
 - [Screenshots](#screenshots)
 - [Demo Flow](#demo-flow)
+- [Alpha MVP Verifier](#alpha-mvp-verifier)
 - [Technical Stack](#technical-stack)
 - [Enterprise Architecture](#enterprise-architecture)
 - [Current Status](#current-status)
@@ -660,6 +661,43 @@ A typical local demo flow:
 7. Watch the live graph execute `BA -> Architect -> Developer -> QA -> Docs -> PR`.
 8. Inspect streamed tokens, logs, outputs, retries, generated docs, QA evidence, and PR artifacts.
 9. Edit a governance rule, roll it back if needed, and re-run the workflow.
+
+---
+
+## Alpha MVP Verifier
+
+For alpha release verification, run the end-to-end MVP verifier after the stack is up.
+
+The verifier checks:
+
+1. API health and readiness.
+2. Governance preload from markdown files.
+3. Governance edit + version history.
+4. Provider create, update, health, and delete.
+5. File uploads (markdown/txt).
+6. Chat-triggered workflow execution.
+7. Execution status, logs, and report availability.
+8. Direct workflow trigger using uploaded context.
+
+Run:
+
+```bash
+python scripts/mvp_demo_verifier.py --api-base http://127.0.0.1:8080/api
+```
+
+Optional:
+
+```bash
+python scripts/mvp_demo_verifier.py --api-base http://127.0.0.1:8080/api --timeout-seconds 360
+```
+
+Expected final line:
+
+```text
+MVP demo verification passed.
+```
+
+If it fails, the script exits with code `1` and prints the exact failing step and API error payload.
 10. Edit an active prompt in Prompt Studio, preview/test it with variables, and re-run an agent.
 
 ---
