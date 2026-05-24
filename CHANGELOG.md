@@ -8,6 +8,10 @@ First public alpha release focused on turning Legion Agents into a real MVP: con
 
 ### Current Operational Status
 
+- Added provider model discovery and model capability profile persistence (`/v1/models` and Ollama `/api/tags`) with API endpoints for refresh/list/manual override.
+- Added context-aware model budget routing so runtime prompt limits are resolved from selected model profiles (context window, output reserve, compact-mode hints).
+- Updated provider dashboard to refresh and display discovered model profiles and compact-mode indicators.
+- Expanded alpha MVP verifier to validate provider model profile listing and manual capability override.
 - Added alpha stabilization recovery for governance preload breadth, provider CRUD reliability, multi-file upload handling, and workflow context hydration from uploaded documents.
 - Added startup seeding/logging behavior so governance markdown documents are discovered and seeded deterministically from mounted repository paths.
 - Added an end-to-end MVP demo verifier script (`scripts/mvp_demo_verifier.py`) that validates health/readiness, governance edit/versioning, provider CRUD, upload, chat-triggered workflow, execution logs, and report generation.

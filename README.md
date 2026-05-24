@@ -543,6 +543,13 @@ curl http://127.0.0.1:8080/api/providers/health
 
 At least one active provider must be configured for real LLM execution.
 
+Model discovery and capability profiling (alpha):
+
+- `POST /api/providers/{provider_id}/models/refresh` discovers provider models (`/v1/models` or Ollama `/api/tags`).
+- `GET /api/providers/{provider_id}/models` returns persisted capability profiles used by runtime adaptation.
+- `PUT /api/providers/{provider_id}/models/{model_id}` allows manual context/capability overrides when provider APIs do not expose limits.
+- Runtime uses model profile budgets to adapt prompt/token limits before each call.
+
 ---
 
 ## Multi-Agent Orchestration
@@ -674,10 +681,11 @@ The verifier checks:
 2. Governance preload from markdown files.
 3. Governance edit + version history.
 4. Provider create, update, health, and delete.
-5. File uploads (markdown/txt).
-6. Chat-triggered workflow execution.
-7. Execution status, logs, and report availability.
-8. Direct workflow trigger using uploaded context.
+5. Provider model profile list and manual capability override.
+6. File uploads (markdown/txt).
+7. Chat-triggered workflow execution.
+8. Execution status, logs, and report availability.
+9. Direct workflow trigger using uploaded context.
 
 Run:
 
@@ -814,6 +822,7 @@ Known limitations:
 - Full MinIO artifact publishing is still evolving.
 - External identity provider integration is not complete.
 - Qdrant-backed retrieval is boundary-ready but not yet the default memory path.
+- Model context windows may still require manual tuning per provider/model in alpha, especially for local OpenAI-compatible backends.
 
 ---
 

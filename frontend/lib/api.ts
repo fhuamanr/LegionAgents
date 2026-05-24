@@ -161,6 +161,7 @@ function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {
     configured: Boolean(item.configured),
     isDefault: Boolean(item.is_default ?? false),
     updatedAt: String(item.updated_at ?? ""),
+    modelProfiles: normalizeModelProfiles(item.model_profiles),
   };
 }
 
@@ -170,6 +171,39 @@ function normalizeProviderHealth(item: Record<string, unknown>): LlmProviderHeal
     status: String(item.status) as LlmProviderHealthCheck["status"],
     message: String(item.message),
     checkedAt: String(item.checked_at ?? ""),
+  };
+}
+
+function normalizeModelProfiles(value: unknown): Record<string, import("./types").LlmModelCapabilityProfile> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const entries = Object.entries(value as Record<string, unknown>);
+  const mapped = entries
+    .map(([key, raw]) => [key, normalizeModelProfile(raw as Record<string, unknown>)] as const)
+    .filter(([, profile]) => Boolean(profile));
+  if (!mapped.length) return undefined;
+  return Object.fromEntries(mapped);
+}
+
+function normalizeModelProfile(item: Record<string, unknown>): import("./types").LlmModelCapabilityProfile {
+  return {
+    providerId: item.provider_id ? String(item.provider_id) : undefined,
+    providerType: String(item.provider_type ?? ""),
+    modelId: String(item.model_id ?? ""),
+    displayName: item.display_name ? String(item.display_name) : undefined,
+    contextWindowTokens: Number(item.context_window_tokens ?? 4096),
+    maxInputTokens: Number(item.max_input_tokens ?? 2500),
+    maxOutputTokens: Number(item.max_output_tokens ?? 1024),
+    supportsStreaming: Boolean(item.supports_streaming ?? true),
+    supportsJsonMode: Boolean(item.supports_json_mode ?? false),
+    supportsTools: Boolean(item.supports_tools ?? false),
+    supportsEmbeddings: Boolean(item.supports_embeddings ?? false),
+    recommendedForChat: Boolean(item.recommended_for_chat ?? true),
+    recommendedForAgents: Boolean(item.recommended_for_agents ?? true),
+    recommendedForCode: Boolean(item.recommended_for_code ?? false),
+    compactModeRequired: Boolean(item.compact_mode_required ?? true),
+    notes: item.notes ? String(item.notes) : undefined,
+    detectionSource: String(item.detection_source ?? "estimated"),
+    lastRefreshedAt: String(item.last_refreshed_at ?? ""),
   };
 }
 

@@ -346,6 +346,7 @@ export interface LlmProviderSummary {
   readonly configured: boolean;
   readonly isDefault?: boolean;
   readonly updatedAt: string;
+  readonly modelProfiles?: Record<string, LlmModelCapabilityProfile>;
 }
 
 export interface LlmProviderHealthCheck {
@@ -353,6 +354,27 @@ export interface LlmProviderHealthCheck {
   readonly status: "ok" | "warning" | "failed" | "disabled";
   readonly message: string;
   readonly checkedAt: string;
+}
+
+export interface LlmModelCapabilityProfile {
+  readonly providerId?: string;
+  readonly providerType: string;
+  readonly modelId: string;
+  readonly displayName?: string;
+  readonly contextWindowTokens: number;
+  readonly maxInputTokens: number;
+  readonly maxOutputTokens: number;
+  readonly supportsStreaming: boolean;
+  readonly supportsJsonMode: boolean;
+  readonly supportsTools: boolean;
+  readonly supportsEmbeddings: boolean;
+  readonly recommendedForChat: boolean;
+  readonly recommendedForAgents: boolean;
+  readonly recommendedForCode: boolean;
+  readonly compactModeRequired: boolean;
+  readonly notes?: string;
+  readonly detectionSource: string;
+  readonly lastRefreshedAt: string;
 }
 
 export type ChatRole = "user" | "assistant" | "system" | "workflow";

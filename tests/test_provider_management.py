@@ -168,3 +168,118 @@ def test_provider_connectivity_endpoint() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_provider_model_discovery_and_refresh_openai_compatible() -> None:
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/v1/models":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"local-small"},{"id":"local-large"}]}')
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format, *args):  # noqa: A003
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}/v1"
+        client = _client()
+        created = client.post(
+            "/providers",
+            json={
+                "name": "LM Studio",
+                "kind": "lm_studio",
+                "base_url": base_url,
+                "default_model": "local-small",
+            },
+        )
+        assert created.status_code == 201
+        provider_id = created.json()["provider"]["id"]
+        refreshed = client.post(f"/providers/{provider_id}/models/refresh")
+        assert refreshed.status_code == 200
+        models = refreshed.json()["models"]
+        assert len(models) == 2
+        assert {item["model_id"] for item in models} == {"local-small", "local-large"}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_provider_model_discovery_ollama_tags() -> None:
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/api/tags":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"models":[{"name":"llama3.1:8b","details":{"family":"llama"}},{"name":"qwen2.5:7b"}]}')
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format, *args):  # noqa: A003
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}/v1"
+        client = _client()
+        created = client.post(
+            "/providers",
+            json={
+                "name": "Ollama Local",
+                "kind": "ollama",
+                "base_url": base_url,
+                "default_model": "llama3.1:8b",
+            },
+        )
+        assert created.status_code == 201
+        provider_id = created.json()["provider"]["id"]
+        refreshed = client.post(f"/providers/{provider_id}/models/refresh")
+        assert refreshed.status_code == 200
+        models = refreshed.json()["models"]
+        assert len(models) >= 1
+        assert any(item["model_id"] == "llama3.1:8b" for item in models)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_provider_manual_model_profile_update() -> None:
+    client = _client()
+    created = client.post(
+        "/providers",
+        json={
+            "name": "Manual Custom",
+            "kind": "custom",
+            "base_url": "http://example.local/v1",
+            "default_model": "my-model",
+        },
+    )
+    assert created.status_code == 201
+    provider_id = created.json()["provider"]["id"]
+    updated = client.put(
+        f"/providers/{provider_id}/models/my-model",
+        json={
+            "context_window_tokens": 16384,
+            "max_input_tokens": 12000,
+            "max_output_tokens": 2000,
+            "compact_mode_required": False,
+            "supports_json_mode": True,
+            "notes": "manual profile",
+        },
+    )
+    assert updated.status_code == 200
+    models = updated.json()["models"]
+    model = next(item for item in models if item["model_id"] == "my-model")
+    assert model["context_window_tokens"] == 16384
+    assert model["detection_source"] == "manual"

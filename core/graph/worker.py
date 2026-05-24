@@ -6,7 +6,7 @@ import asyncio
 import os
 from uuid import UUID
 
-from core.agents.model_clients import OpenAIChatModelClient
+from core.agents.providers import ProviderRegistry, RoutingModelClient
 from core.graph.execution import LangGraphExecutionRuntime
 from core.graph.persistence import PostgresWorkflowExecutionRepository, WorkflowExecutionRecord, WorkflowRunStatus
 from core.persistence import PostgresJsonDocumentStore
@@ -20,7 +20,8 @@ async def main() -> None:
         raise RuntimeError("POSTGRES_DSN is required for the LangGraph runtime worker.")
     store = PostgresJsonDocumentStore(dsn)
     repository = PostgresWorkflowExecutionRepository(store)
-    client = OpenAIChatModelClient()
+    provider_registry = ProviderRegistry(store)
+    client = RoutingModelClient(provider_registry)
     print("LangGraph runtime worker ready", flush=True)
     while True:
         await _recover_running_records(store, repository, client)
@@ -30,7 +31,7 @@ async def main() -> None:
 async def _recover_running_records(
     store: PostgresJsonDocumentStore,
     repository: PostgresWorkflowExecutionRepository,
-    client: OpenAIChatModelClient,
+    client: RoutingModelClient,
 ) -> None:
     records = tuple(
         WorkflowExecutionRecord.model_validate(payload)
@@ -43,6 +44,7 @@ async def _recover_running_records(
         try:
             await runtime.recover(UUID(str(record.execution_id)))
         except Exception as exc:
+            print(f"workflow recovery failed: execution_id={record.execution_id} error={exc}", flush=True)
             failed = record.model_copy(
                 update={
                     "status": WorkflowRunStatus.FAILED,

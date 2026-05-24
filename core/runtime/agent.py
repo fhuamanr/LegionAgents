@@ -52,7 +52,10 @@ class BaseAgent(ABC, Generic[TOutput]):
 
         self._logger.info("agent_execution_started", extra={"agent_name": self.config.name})
         try:
-            result = await self._retry_engine.run(lambda: self._execute_once(request))
+            result = await self._retry_engine.run(
+                lambda: self._execute_once(request),
+                on_decision=self._on_retry_decision,
+            )
         except Exception as exc:
             self._logger.exception("agent_execution_failed", extra={"agent_name": self.config.name})
             return self._failure(request=request, errors=(str(exc),))
@@ -171,4 +174,19 @@ class BaseAgent(ABC, Generic[TOutput]):
             agent_name=self.config.name,
             status=AgentStatus.FAILED,
             errors=errors,
+        )
+
+    def _on_retry_decision(self, event) -> None:
+        self._logger.warning(
+            event.event_type,
+            extra={
+                "agent_name": self.config.name,
+                "attempt": event.attempt,
+                "max_attempts": event.max_attempts,
+                "classification": event.classification,
+                "retry_allowed": event.retry_allowed,
+                "compression_allowed": event.compression_allowed,
+                "error_type": event.error_type,
+                "suggested_action": event.suggested_action,
+            },
         )

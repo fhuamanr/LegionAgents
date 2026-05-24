@@ -130,7 +130,25 @@ export function ProviderManagement({
                       ))
                     )}
                   </div>
+                  {provider.modelProfiles && Object.keys(provider.modelProfiles).length > 0 ? (
+                    <div className="mt-4 rounded-md border bg-muted/30 p-3">
+                      <div className="mb-2 text-xs font-semibold">Discovered models</div>
+                      <div className="space-y-2">
+                        {Object.values(provider.modelProfiles).map((profile) => (
+                          <div key={profile.modelId} className="rounded border bg-background p-2 text-xs">
+                            <div className="font-medium">{profile.displayName ?? profile.modelId}</div>
+                            <div className="text-muted-foreground">
+                              ctx {profile.contextWindowTokens} | in {profile.maxInputTokens} | out {profile.maxOutputTokens} | {profile.compactModeRequired ? "compact" : "standard"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="mt-4">
+                    <Button variant="outline" size="sm" onClick={() => void refreshModels(provider.id)} className="mr-2">
+                      Refresh models
+                    </Button>
                     <Button variant="destructive" size="sm" onClick={() => void deleteProvider(provider.id)}>
                       Delete
                     </Button>
@@ -267,6 +285,22 @@ export function ProviderManagement({
       setMessage(`Provider delete failed: ${error instanceof Error ? error.message : "unknown error"}`);
     }
   }
+
+  async function refreshModels(providerId: string): Promise<void> {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) return;
+    try {
+      const response = await fetch(`${apiBaseUrl}/providers/${providerId}/models/refresh`, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(await extractError(response));
+      await refreshProviders();
+      setMessage("Models refreshed.");
+    } catch (error) {
+      setMessage(`Model refresh failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
 }
 
 async function extractError(response: Response): Promise<string> {
@@ -295,7 +329,38 @@ function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {
     configured: Boolean(item.configured),
     isDefault: Boolean(item.is_default ?? false),
     updatedAt: String(item.updated_at ?? ""),
+    modelProfiles: normalizeModelProfiles(item.model_profiles),
   };
+}
+
+function normalizeModelProfiles(value: unknown): Record<string, import("@/lib/types").LlmModelCapabilityProfile> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const records = value as Record<string, Record<string, unknown>>;
+  return Object.fromEntries(
+    Object.entries(records).map(([key, item]) => [
+      key,
+      {
+        providerId: item.provider_id ? String(item.provider_id) : undefined,
+        providerType: String(item.provider_type ?? ""),
+        modelId: String(item.model_id ?? key),
+        displayName: item.display_name ? String(item.display_name) : undefined,
+        contextWindowTokens: Number(item.context_window_tokens ?? 4096),
+        maxInputTokens: Number(item.max_input_tokens ?? 2500),
+        maxOutputTokens: Number(item.max_output_tokens ?? 1024),
+        supportsStreaming: Boolean(item.supports_streaming ?? true),
+        supportsJsonMode: Boolean(item.supports_json_mode ?? false),
+        supportsTools: Boolean(item.supports_tools ?? false),
+        supportsEmbeddings: Boolean(item.supports_embeddings ?? false),
+        recommendedForChat: Boolean(item.recommended_for_chat ?? true),
+        recommendedForAgents: Boolean(item.recommended_for_agents ?? true),
+        recommendedForCode: Boolean(item.recommended_for_code ?? false),
+        compactModeRequired: Boolean(item.compact_mode_required ?? true),
+        notes: item.notes ? String(item.notes) : undefined,
+        detectionSource: String(item.detection_source ?? "estimated"),
+        lastRefreshedAt: String(item.last_refreshed_at ?? ""),
+      },
+    ]),
+  );
 }
 
 function normalizeProviderHealth(item: Record<string, unknown>): LlmProviderHealthCheck {

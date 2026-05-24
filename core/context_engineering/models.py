@@ -44,7 +44,7 @@ class ContextEngineeringConfig(ContractBaseModel):
     enable_architecture_summary: bool = True
     enable_memory: bool = True
     enable_compression: bool = True
-    repository_file_limit: int = Field(default=200, ge=1)
+    repository_file_limit: int = Field(default=200, ge=0)
     selected_repository_file_limit: int = Field(default=12, ge=0)
     repository_file_token_soft_limit: int = Field(default=900, ge=100)
     repository_file_max_bytes: int = Field(default=20_000, ge=1000)

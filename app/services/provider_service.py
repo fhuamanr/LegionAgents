@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from app.schemas import ProviderConnectivityApiRequest, ProviderConnectivityResponse, ProviderHealthResponse, ProviderListResponse, ProviderResponse, ProviderUpsertApiRequest
+from app.schemas import ProviderConnectivityApiRequest, ProviderConnectivityResponse, ProviderHealthResponse, ProviderListResponse, ProviderModelProfilesResponse, ProviderResponse, ProviderUpsertApiRequest
 from core.agents.providers import ProviderConfig, ProviderKind, ProviderRegistry, ProviderStatus
 
 
@@ -51,6 +51,7 @@ class ProviderApplicationService:
             is_default=request.is_default or (existing.is_default if existing else not has_default),
             metadata=request.metadata,
             capabilities=(existing.capabilities if existing else {}),
+            model_profiles=(existing.model_profiles if existing else {}),
         )
         saved = await self._registry.upsert(provider)
         return ProviderResponse(provider=saved.public_dict())
@@ -85,3 +86,27 @@ class ProviderApplicationService:
         )
         result = await self._registry.test_connection(candidate)
         return ProviderConnectivityResponse(result=result)
+
+    async def list_models(self, provider_id: UUID) -> ProviderModelProfilesResponse:
+        provider = await self._registry.get(provider_id)
+        if provider is None:
+            raise KeyError(str(provider_id))
+        if not provider.model_profiles:
+            profiles = await self._registry.discover_models(provider)
+            return ProviderModelProfilesResponse(models=tuple(item.model_dump(mode="json") for item in profiles))
+        return ProviderModelProfilesResponse(
+            models=tuple(item.model_dump(mode="json") for item in provider.model_profiles.values())
+        )
+
+    async def refresh_models(self, provider_id: UUID) -> ProviderModelProfilesResponse:
+        profiles = await self._registry.refresh_models(provider_id)
+        return ProviderModelProfilesResponse(models=tuple(item.model_dump(mode="json") for item in profiles))
+
+    async def update_model_profile(self, provider_id: UUID, model_id: str, updates: dict[str, object]) -> ProviderModelProfilesResponse:
+        await self._registry.update_model_profile(provider_id, model_id, updates)
+        provider = await self._registry.get(provider_id)
+        if provider is None:
+            raise KeyError(str(provider_id))
+        return ProviderModelProfilesResponse(
+            models=tuple(item.model_dump(mode="json") for item in provider.model_profiles.values())
+        )

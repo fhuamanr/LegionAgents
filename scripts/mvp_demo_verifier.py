@@ -112,7 +112,7 @@ def verify(api_base: str, workspace_root: Path, timeout_seconds: int) -> None:
     if len(versions) < 1:
         raise VerifierError("Governance version history was not produced.")
 
-    print("3) Verifying provider CRUD and health...")
+    print("3) Verifying provider CRUD, health, model profiles, and manual capability settings...")
     created_provider = _request(
         "POST",
         f"{api_base}/providers",
@@ -139,6 +139,22 @@ def verify(api_base: str, workspace_root: Path, timeout_seconds: int) -> None:
         },
     )
     _request("GET", f"{api_base}/providers/{provider_id}/health")
+    discovered_models = _request("GET", f"{api_base}/providers/{provider_id}/models").get("models", [])
+    if len(discovered_models) < 1:
+        raise VerifierError("Provider model profile listing returned no models.")
+    _request(
+        "PUT",
+        f"{api_base}/providers/{provider_id}/models/{created_provider['default_model']}",
+        payload={
+            "context_window_tokens": 4096,
+            "max_input_tokens": 2500,
+            "max_output_tokens": 1000,
+            "supports_streaming": True,
+            "supports_json_mode": False,
+            "compact_mode_required": True,
+            "notes": "alpha verifier manual override",
+        },
+    )
 
     print("4) Uploading markdown/txt files through upload API...")
     uploads_dir = workspace_root / "outputs" / "mvp_verifier"

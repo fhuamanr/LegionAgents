@@ -78,6 +78,25 @@ class ProviderConnectivityResponse(ApiModel):
     result: dict[str, Any]
 
 
+class ProviderModelProfileUpdateRequest(ApiModel):
+    context_window_tokens: int | None = None
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    supports_streaming: bool | None = None
+    supports_json_mode: bool | None = None
+    supports_tools: bool | None = None
+    supports_embeddings: bool | None = None
+    recommended_for_chat: bool | None = None
+    recommended_for_agents: bool | None = None
+    recommended_for_code: bool | None = None
+    compact_mode_required: bool | None = None
+    notes: str | None = None
+
+
+class ProviderModelProfilesResponse(ApiModel):
+    models: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
 class UserStoryUploadRequest(ApiModel):
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)

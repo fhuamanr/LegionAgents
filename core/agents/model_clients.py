@@ -10,7 +10,6 @@ from openai import AsyncOpenAI
 
 from core.agents.runtime import AgentModelClient
 from core.contracts.prompts import PromptMessage
-from core.runtime.retry import ContextWindowExceededError
 
 
 class OpenAICompatibleChatModelClient(AgentModelClient):
@@ -124,7 +123,7 @@ class OpenAICompatibleChatModelClient(AgentModelClient):
         final = tuple(budgeted)
         final_tokens = self._estimate_prompt_tokens(final)
         if self._max_prompt_tokens and final_tokens > self._max_prompt_tokens:
-            raise ContextWindowExceededError(
+            raise ValueError(
                 f"Prompt exceeded model context window after compression. estimated_prompt_tokens={final_tokens}, max_prompt_tokens={self._max_prompt_tokens}."
             )
         return final, estimated, True
