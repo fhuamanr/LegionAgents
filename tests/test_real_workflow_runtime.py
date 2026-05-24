@@ -80,6 +80,14 @@ class GovernanceInvalidDeveloperModelClient(WorkflowModelClient):
         return await super().complete(messages)
 
 
+class InvalidBASectionModelClient(WorkflowModelClient):
+    async def complete(self, messages: tuple[PromptMessage, ...]) -> str:
+        prompt = "\n\n".join(message.content for message in messages)
+        if "Agent name: ba." in prompt or "BA agent" in prompt:
+            return "not json"
+        return await super().complete(messages)
+
+
 @pytest.mark.asyncio
 async def test_real_workflow_runtime_executes_full_delivery_sequence() -> None:
     repository = InMemoryWorkflowExecutionRepository()
@@ -204,3 +212,22 @@ async def test_execution_owner_blocks_cross_owner_recovery() -> None:
     started = await backend_runtime.start("owner test")
     record = await repository.get(started.execution_id)
     assert record.metadata["execution_owner"] == "backend"
+
+
+@pytest.mark.asyncio
+async def test_ba_sections_parse_failure_does_not_emit_retry_started() -> None:
+    events: list[str] = []
+
+    async def hook(event_name: str, state: dict[str, object]) -> None:
+        events.append(event_name)
+
+    runtime = LangGraphExecutionRuntime(
+        model_client=InvalidBASectionModelClient(),
+        event_hook=hook,
+    )
+    result = await runtime.start(
+        "Test BA parser fallback",
+        metadata={"workflow_mode": "ba_only"},
+    )
+    assert result.status == WorkflowRunStatus.FAILED
+    assert "retry_started" not in events

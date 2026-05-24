@@ -101,8 +101,39 @@ async def test_validator_limits_ba_story_and_criteria_counts() -> None:
             }
         )
     parsed = await validator.validate(json.dumps({"agent_name": "ba", "summary": "ok", "user_stories": stories}))
-    assert len(parsed.user_stories) == 5
-    assert all(len(story.acceptance_criteria) <= 4 for story in parsed.user_stories)
+    assert len(parsed.user_stories) == 3
+    assert all(len(story.acceptance_criteria) <= 3 for story in parsed.user_stories)
+
+
+@pytest.mark.asyncio
+async def test_validator_parses_ba_section_strategy_without_json() -> None:
+    validator = PydanticOutputValidator(BARequirementsOutput)
+    raw = """
+NORMALIZED_REQUIREMENT:
+Necesito MVP ecommerce.
+
+USER_STORIES:
+1. As a buyer, I want product list, so that I can browse.
+   AC:
+   - Products are visible
+   - Basic filters work
+2. As a user, I want account creation, so that I can buy.
+   AC:
+   - Email/password signup
+
+ASSUMPTIONS:
+- No external integrations
+- Single region
+
+RISKS:
+- Scope creep
+
+DEPENDENCIES:
+- Product catalog seed
+"""
+    parsed = await validator.validate(raw, strategy="ba_sections")
+    assert parsed.normalized_requirement
+    assert len(parsed.user_stories) >= 1
 
 
 @pytest.mark.asyncio

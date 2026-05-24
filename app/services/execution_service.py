@@ -187,6 +187,8 @@ class ExecutionService:
         metadata: dict[str, Any] = dict(request.metadata)
         local_safe_mode = str(os.getenv("LOCAL_LM_STUDIO_SAFE_MODE", "")).strip().lower() in {"1", "true", "yes", "on"}
         metadata.setdefault("local_lm_studio_safe_mode", local_safe_mode)
+        if local_safe_mode and "workflow_mode" not in metadata and "workflow_type" not in metadata:
+            metadata["workflow_mode"] = "ba_only"
         if request.upload_id:
             metadata["upload_id"] = str(request.upload_id)
         progress_hook = metadata.pop("progress_hook", None)

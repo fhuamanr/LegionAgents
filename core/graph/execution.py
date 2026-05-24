@@ -98,13 +98,14 @@ class LangGraphExecutionRuntime:
             metadata={**(metadata or {}), "execution_id": str(execution_id or uuid4())},
         )
         execution_uuid = UUID(str(workflow_state.metadata["execution_id"]))
+        sequence = self._sequence_for_metadata(metadata or {})
         record = WorkflowExecutionRecord(
             execution_id=execution_uuid,
             workflow_id=workflow_state.workflow_id,
             task=task,
             status=WorkflowRunStatus.RUNNING,
             started_at=datetime.now(timezone.utc),
-            next_agent=DEFAULT_DELIVERY_SEQUENCE[0],
+            next_agent=sequence[0],
             metadata={**(metadata or {}), "execution_owner": self._execution_owner},
         )
         await self._repository.create(record)
@@ -112,7 +113,7 @@ class LangGraphExecutionRuntime:
             "execution_id": execution_uuid,
             "workflow_state": workflow_state,
             "status": WorkflowRunStatus.RUNNING.value,
-            "next_agent": DEFAULT_DELIVERY_SEQUENCE[0],
+            "next_agent": sequence[0],
             "last_agent": None,
             "attempts": {},
             "errors": [],
@@ -372,14 +373,17 @@ class LangGraphExecutionRuntime:
         status = WorkflowRunStatus(str(state.get("status", WorkflowRunStatus.RUNNING.value)))
         if status != WorkflowRunStatus.RUNNING:
             return None
+        sequence = self._sequence_for_metadata(dict(state.get("metadata", {})))
         last_agent = state.get("last_agent")
         workflow_state = state["workflow_state"]
         if last_agent is None:
-            return state.get("next_agent") or DEFAULT_DELIVERY_SEQUENCE[0]
+            return state.get("next_agent") or sequence[0]
 
         snapshot = workflow_state.agent_states.get(last_agent)
         attempts = dict(state.get("attempts", {}))
         if snapshot is not None and snapshot.status == AgentStatus.FAILED:
+            if snapshot.metadata.get("retry_allowed") is False:
+                return self._mark_terminal(state, WorkflowRunStatus.FAILED)
             if attempts.get(last_agent, 0) < self._max_agent_attempts:
                 return last_agent
             return self._mark_terminal(state, WorkflowRunStatus.FAILED)
@@ -391,10 +395,18 @@ class LangGraphExecutionRuntime:
                 return "developer"
             return self._mark_terminal(state, WorkflowRunStatus.FAILED)
 
-        index = DEFAULT_DELIVERY_SEQUENCE.index(last_agent)
-        if index + 1 >= len(DEFAULT_DELIVERY_SEQUENCE):
+        index = sequence.index(last_agent)
+        if index + 1 >= len(sequence):
             return None
-        return DEFAULT_DELIVERY_SEQUENCE[index + 1]
+        return sequence[index + 1]
+
+    def _sequence_for_metadata(self, metadata: dict[str, Any]) -> tuple[str, ...]:
+        mode = str(metadata.get("workflow_mode", metadata.get("workflow_type", "full"))).lower().strip()
+        if mode in {"ba_only", "ba-only", "ba"}:
+            return ("ba",)
+        if mode in {"ba_architect", "ba+architect", "ba_arch", "ba-architect"}:
+            return ("ba", "architect")
+        return DEFAULT_DELIVERY_SEQUENCE
 
     def _should_pause(self, state: RealWorkflowRuntimeState, next_agent: str | None) -> bool:
         pause_after_agent = state.get("metadata", {}).get("pause_after_agent")

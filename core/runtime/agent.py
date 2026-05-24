@@ -71,7 +71,7 @@ class BaseAgent(ABC, Generic[TOutput]):
             return self._failure(
                 request=request,
                 errors=(error_text,),
-                metadata={"error_type": error_type, "raw_output_preview": error_text[:1200]},
+                metadata={"error_type": error_type, "raw_output_preview": error_text[:1200], "retry_allowed": False},
             )
 
         self._logger.info("agent_execution_completed", extra={"agent_name": self.config.name})
@@ -96,7 +96,8 @@ class BaseAgent(ABC, Generic[TOutput]):
         raw_output = await self.invoke(runtime_context)
         duration_seconds = max(0.0, time.perf_counter() - started)
         await self._enforce_governance_output(runtime_context, raw_output)
-        structured_output = await self._output_validator.validate(raw_output)
+        parse_strategy = "ba_sections" if (self.config.name == "ba" and bool(request.metadata.get("local_lm_studio_safe_mode", False))) else None
+        structured_output = await self._output_validator.validate(raw_output, strategy=parse_strategy)
         validation_metadata = dict(getattr(self._output_validator, "last_validation_metadata", {}))
         await self._enforce_governance_output(runtime_context, raw_output, structured_output)
         artifacts = await self.build_artifacts(request, structured_output)
@@ -123,6 +124,7 @@ class BaseAgent(ABC, Generic[TOutput]):
                     "sanitization_applied": validation_metadata.get("sanitization_applied", False),
                     "fields_removed": validation_metadata.get("fields_removed", []),
                     "validation_result": validation_metadata.get("validation_result", "unknown"),
+                    "parse_strategy": parse_strategy or "json",
                 },
                 **self.result_metadata(structured_output),
             },
@@ -230,7 +232,6 @@ class BaseAgent(ABC, Generic[TOutput]):
         prompt_messages: tuple,
     ) -> tuple[tuple, dict[str, object]]:
         safe_mode = bool(request.metadata.get("local_lm_studio_safe_mode", False))
-        is_ba = self.config.name == "ba"
         before = sum(max(1, len(message.content) // 4) for message in prompt_messages)
         obs: dict[str, object] = {
             "prompt_tokens_before": before,
@@ -238,30 +239,62 @@ class BaseAgent(ABC, Generic[TOutput]):
             "sections_removed": 0,
             "final_prompt_tokens": before,
         }
-        if not safe_mode or not is_ba:
+        budgets = {
+            "ba": 900,
+            "architect": 1200,
+            "developer": 1400,
+            "qa": 1000,
+            "docs": 900,
+            "pr": 700,
+        }
+        output_budgets = {
+            "ba": 450,
+            "architect": 600,
+            "developer": 700,
+            "qa": 500,
+            "docs": 500,
+            "pr": 350,
+        }
+        max_tokens = int(budgets.get(self.config.name, 1200))
+        obs["budget"] = max_tokens
+        obs["output_budget"] = int(output_budgets.get(self.config.name, 600))
+        if not safe_mode:
             return prompt_messages, obs
-        max_tokens = 1200
         if before <= max_tokens:
             return prompt_messages, obs
-        compact_user = (
-            "# Task\n\n"
-            f"{request.task.strip()}\n\n"
-            "# BA Rules (Compact)\n"
-            "- Act only as BA.\n"
-            "- Define MVP scope.\n"
-            "- List core entities.\n"
-            "- Capture key user flows.\n"
-            "- Provide acceptance criteria.\n"
-            "- Include out-of-scope items.\n"
-            "- Keep assumptions explicit.\n"
-            "- Keep output concise JSON.\n"
-            "- Do not include implementation/code.\n"
-            "- Do not include architecture/design docs.\n"
+
+        compact_system = prompt_messages[0].content
+        compact_user = f"# Task\n\n{request.task.strip()}\n\n# Upstream Summary\n"
+        compact_user += "\n".join(
+            f"- {artifact.kind.value}: {artifact.name} ({artifact.producer_agent})"
+            for artifact in request.upstream_artifacts[:3]
         )
-        compact_system = (
-            "You are the BA agent. Return concise valid JSON only. "
-            "Do not include markdown wrappers, repository context, architecture rules, or downstream agent rules."
-        )
+        if self.config.name == "ba":
+            compact_system = (
+                "You are the BA agent. Return only final answer. Do not include reasoning. "
+                "Do not output JSON."
+            )
+            compact_user += (
+                "\n\nOUTPUT FORMAT (STRICT):\n"
+                "NORMALIZED_REQUIREMENT:\n"
+                "...\n\n"
+                "USER_STORIES:\n"
+                "1. As a..., I want..., so that...\n"
+                "   AC:\n"
+                "   - ...\n\n"
+                "ASSUMPTIONS:\n"
+                "- ...\n\n"
+                "RISKS:\n"
+                "- ...\n\n"
+                "DEPENDENCIES:\n"
+                "- ...\n"
+            )
+        elif self.config.name == "architect":
+            compact_user += (
+                "\n\nOutput only compact architecture summary: "
+                "technical approach (max 5 bullets), affected areas (max 5), constraints (max 3)."
+            )
+
         compact = (
             prompt_messages[0].model_copy(update={"content": compact_system}),
             prompt_messages[1].model_copy(update={"content": compact_user}),
@@ -272,11 +305,12 @@ class BaseAgent(ABC, Generic[TOutput]):
                 "prompt_tokens_after": after,
                 "sections_removed": 1,
                 "final_prompt_tokens": after,
+                "compression_applied": True,
             }
         )
         if after > max_tokens:
             raise ValueError(
-                "BA prompt too large for local safe mode after reduction. "
+                f"{self.config.name} prompt too large for local safe mode after reduction. "
                 f"prompt_tokens_before={before} prompt_tokens_after={after} max_prompt_tokens={max_tokens}"
             )
         return compact, obs

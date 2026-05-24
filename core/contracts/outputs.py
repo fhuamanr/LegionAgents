@@ -239,7 +239,9 @@ class BARequirementsOutput(AgentStructuredOutput):
     """BA output contract."""
 
     contract_kind: OutputContractKind = OutputContractKind.BA_REQUIREMENTS
+    normalized_requirement: str = Field(default="", min_length=0)
     user_stories: tuple[UserStory, ...] = Field(default_factory=tuple)
+    assumptions: tuple[str, ...] = Field(default_factory=tuple)
 
 
 class ArchitectOutput(AgentStructuredOutput):

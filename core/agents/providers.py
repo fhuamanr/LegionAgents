@@ -219,9 +219,26 @@ class ProviderRegistry:
             )
         if local_lm_studio_safe_mode and provider.kind == ProviderKind.LM_STUDIO:
             timeout_seconds = max(float(timeout_seconds or 60), 180.0)
-            if agent_name == "ba":
-                max_prompt_tokens = min(int(max_prompt_tokens or 1200), 1200)
-                reserved_output = min(int(reserved_output or 700), 700)
+            safe_prompt_budget = {
+                "ba": 900,
+                "architect": 1200,
+                "developer": 1400,
+                "qa": 1000,
+                "docs": 900,
+                "pr": 700,
+            }
+            safe_output_budget = {
+                "ba": 450,
+                "architect": 600,
+                "developer": 700,
+                "qa": 500,
+                "docs": 500,
+                "pr": 350,
+            }
+            prompt_cap = safe_prompt_budget.get(agent_name or "", 1200)
+            output_cap = safe_output_budget.get(agent_name or "", 600)
+            max_prompt_tokens = min(int(max_prompt_tokens or prompt_cap), prompt_cap)
+            reserved_output = min(int(reserved_output or output_cap), output_cap)
         return OpenAICompatibleChatModelClient(
             model=model_name,
             api_key=provider.api_key or _local_api_key(provider),

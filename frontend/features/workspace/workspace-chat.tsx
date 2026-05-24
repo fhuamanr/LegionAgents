@@ -24,6 +24,7 @@ export function WorkspaceChat({
   const [workflowLogs, setWorkflowLogs] = useState<readonly { id: string; message: string; type: string }[]>([]);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(conversations.length ? null : "Upload files or create a conversation to start.");
+  const [workflowMode, setWorkflowMode] = useState<"ba_only" | "ba_architect" | "full">("ba_only");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const conversation = useMemo(() => items.find((item) => item.id === selectedId) ?? items[0], [items, selectedId]);
   const attachmentIds = conversation?.attachments.map((attachment) => attachment.id) ?? [];
@@ -119,6 +120,20 @@ export function WorkspaceChat({
               placeholder="Ask to analyze requirements, generate stories, or trigger workflow execution..."
               className="max-h-44 min-h-20 w-full resize-y rounded-md border bg-background p-3 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
+            <div className="flex flex-col gap-2">
+              <select
+                className="h-10 rounded-md border bg-background px-2 text-xs"
+                value={workflowMode}
+                onChange={(event) => setWorkflowMode(event.target.value as "ba_only" | "ba_architect" | "full")}
+              >
+                <option value="ba_only">BA only</option>
+                <option value="ba_architect">BA + Architect</option>
+                <option value="full">Full workflow</option>
+              </select>
+              {workflowMode === "full" ? (
+                <p className="max-w-44 text-[11px] text-amber-600">Local 4096 context mode may fail or be slow. Prefer compact mode or cloud provider.</p>
+              ) : null}
+            </div>
             <Button variant="outline" className="h-12" onClick={() => void sendMessage(true)} disabled={busy || !draft.trim()}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />}
               Workflow
@@ -228,7 +243,12 @@ export function WorkspaceChat({
         const response = await fetch(`${apiBaseUrl}/workspace/chat/conversations/${active.id}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ content: requestContent, attachment_ids: attachmentIds, trigger_workflow: true }),
+          body: JSON.stringify({
+            content: requestContent,
+            attachment_ids: attachmentIds,
+            trigger_workflow: true,
+            metadata: { workflow_mode: workflowMode },
+          }),
         });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         await refreshConversation(active.id);

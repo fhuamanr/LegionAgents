@@ -1,6 +1,7 @@
 """Structured output validation."""
 
 import json
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar
 
@@ -13,7 +14,7 @@ class OutputValidator(ABC, Generic[TOutput]):
     """Validates raw agent output into a structured output schema."""
 
     @abstractmethod
-    async def validate(self, raw_output: str) -> TOutput:
+    async def validate(self, raw_output: str, *, strategy: str | None = None) -> TOutput:
         """Validate and return structured output."""
 
 
@@ -24,8 +25,8 @@ class PydanticOutputValidator(OutputValidator[TOutput]):
         self._output_model = output_model
         self.last_validation_metadata: dict[str, Any] = {}
 
-    async def validate(self, raw_output: str) -> TOutput:
-        payload, parse_meta = self._parse_json(raw_output)
+    async def validate(self, raw_output: str, *, strategy: str | None = None) -> TOutput:
+        payload, parse_meta = self._parse_payload(raw_output, strategy=strategy)
         normalized_payload, pre_removed = _sanitize_for_model(self._output_model, payload)
         self.last_validation_metadata = {
             "json_extracted": parse_meta["json_extracted"],
@@ -50,6 +51,12 @@ class PydanticOutputValidator(OutputValidator[TOutput]):
                     pass
             self.last_validation_metadata["validation_result"] = "schema_contract_error"
             raise ValueError(f"schema_contract_error: {self._format_validation_error(exc)}") from exc
+
+    def _parse_payload(self, raw_output: str, *, strategy: str | None = None) -> tuple[dict[str, Any], dict[str, bool]]:
+        if strategy == "ba_sections":
+            payload = self._parse_ba_sections(raw_output)
+            return payload, {"json_extracted": False, "json_repaired": False}
+        return self._parse_json(raw_output)
 
     def _parse_json(self, raw_output: str) -> tuple[dict[str, Any], dict[str, bool]]:
         extracted = self._extract_json_block(raw_output)
@@ -93,6 +100,73 @@ class PydanticOutputValidator(OutputValidator[TOutput]):
         except json.JSONDecodeError:
             return None
 
+    def _parse_ba_sections(self, raw_output: str) -> dict[str, Any]:
+        text = raw_output.strip()
+        sections = {
+            "NORMALIZED_REQUIREMENT:": "",
+            "USER_STORIES:": "",
+            "ASSUMPTIONS:": "",
+            "RISKS:": "",
+            "DEPENDENCIES:": "",
+        }
+        current: str | None = None
+        buffers: dict[str, list[str]] = {key: [] for key in sections}
+        for line in text.splitlines():
+            marker = line.strip().upper()
+            if marker in sections:
+                current = marker
+                continue
+            if current is not None:
+                buffers[current].append(line.rstrip())
+        normalized = " ".join(item.strip() for item in buffers["NORMALIZED_REQUIREMENT:"] if item.strip()).strip()
+        assumptions = [line.lstrip("- ").strip() for line in buffers["ASSUMPTIONS:"] if line.strip()]
+        risks = [line.lstrip("- ").strip() for line in buffers["RISKS:"] if line.strip()]
+        dependencies = [line.lstrip("- ").strip() for line in buffers["DEPENDENCIES:"] if line.strip()]
+
+        stories: list[dict[str, Any]] = []
+        current_story: dict[str, Any] | None = None
+        ac_index = 1
+        for raw_line in buffers["USER_STORIES:"]:
+            line = raw_line.strip()
+            if not line:
+                continue
+            if re.match(r"^\d+\.\s+", line):
+                if current_story is not None:
+                    stories.append(current_story)
+                story_text = re.split(r"^\d+\.\s+", line, maxsplit=1)[1].strip()
+                sid = f"US-{len(stories) + 1}"
+                current_story = {
+                    "id": sid,
+                    "title": story_text[:80] or sid,
+                    "narrative": story_text or f"As a user, I want {sid}",
+                    "acceptance_criteria": [],
+                }
+                ac_index = 1
+                continue
+            if current_story is None:
+                continue
+            stripped = line.replace("AC:", "").lstrip("- ").strip()
+            if stripped:
+                current_story["acceptance_criteria"].append(
+                    {
+                        "id": f"{current_story['id']}-AC-{ac_index}",
+                        "scenario": stripped[:120],
+                        "expected_result": stripped[:160],
+                    }
+                )
+                ac_index += 1
+        if current_story is not None:
+            stories.append(current_story)
+        return {
+            "agent_name": "ba",
+            "summary": normalized[:180] or "BA requirements extracted.",
+            "normalized_requirement": normalized[:500],
+            "user_stories": stories[:3],
+            "assumptions": assumptions[:3],
+            "risks": [{"id": f"R-{index+1}", "title": risk[:80] or f"Risk {index+1}", "severity": "medium", "description": risk[:240]} for index, risk in enumerate(risks[:3])],
+            "dependencies": [{"name": dep[:80] or f"Dependency {index+1}", "description": dep[:200], "blocking": True} for index, dep in enumerate(dependencies[:3])],
+        }
+
     def _format_validation_error(self, exc: ValidationError) -> str:
         return "; ".join(
             f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
@@ -133,10 +207,13 @@ def _sanitize_for_model(model: type[BaseModel], payload: dict[str, Any]) -> tupl
 
     if model.__name__ == "BARequirementsOutput":
         stories = list(sanitized.get("user_stories", []))
-        stories = stories[:5]
+        stories = stories[:3]
         for story in stories:
             if isinstance(story, dict):
                 criteria = list(story.get("acceptance_criteria", []))
-                story["acceptance_criteria"] = criteria[:4]
+                story["acceptance_criteria"] = criteria[:3]
         sanitized["user_stories"] = stories
+        sanitized["assumptions"] = list(sanitized.get("assumptions", []))[:3]
+        sanitized["risks"] = list(sanitized.get("risks", []))[:3]
+        sanitized["dependencies"] = list(sanitized.get("dependencies", []))[:3]
     return sanitized, removed

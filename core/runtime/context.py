@@ -124,12 +124,20 @@ class MarkdownRuleContextAssembler(ContextAssembler):
         return "\n\n".join(str(artifact.content) for artifact in architecture_artifacts) or None
 
     def _upstream_context(self, request: AgentExecutionRequest) -> tuple[str, ...]:
+        safe_mode = bool(request.metadata.get("local_lm_studio_safe_mode", False))
         values: list[str] = []
         for key in ("ba_stories", "architecture_context", "qa_results", "generated_outputs"):
             value = str(request.metadata.get(key, "")).strip()
             if value:
                 values.append(value)
         for artifact in request.upstream_artifacts:
+            if safe_mode:
+                snippet = (artifact.content or "")[:400].replace("\n", " ").strip()
+                values.append(
+                    f"{artifact.kind.value} artifact from {artifact.producer_agent}: {artifact.name}"
+                    + (f" | summary: {snippet}" if snippet else "")
+                )
+                continue
             if artifact.content:
                 values.append(
                     f"{artifact.kind.value} artifact from {artifact.producer_agent}: {artifact.name}\n"
