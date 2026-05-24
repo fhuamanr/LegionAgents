@@ -178,7 +178,12 @@ def test_provider_connectivity_endpoint() -> None:
 def test_provider_model_discovery_and_refresh_openai_compatible() -> None:
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
-            if self.path == "/v1/models":
+            if self.path == "/api/v1/models":
+                auth = self.headers.get("Authorization", "")
+                if auth != "Bearer lm-token":
+                    self.send_response(401)
+                    self.end_headers()
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -194,7 +199,7 @@ def test_provider_model_discovery_and_refresh_openai_compatible() -> None:
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        base_url = f"http://127.0.0.1:{server.server_port}/v1"
+        base_url = f"http://127.0.0.1:{server.server_port}"
         client = _client()
         created = client.post(
             "/providers",
@@ -202,6 +207,7 @@ def test_provider_model_discovery_and_refresh_openai_compatible() -> None:
                 "name": "LM Studio",
                 "kind": "lm_studio",
                 "base_url": base_url,
+                "api_key": "lm-token",
                 "default_model": "local-small",
             },
         )
@@ -295,29 +301,39 @@ def test_lmstudio_runtime_management_updates_actual_context_profile() -> None:
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
-            if self.path == "/v1/models":
+            if self.path == "/api/v1/models":
+                auth = self.headers.get("Authorization", "")
+                if auth != "Bearer lm-token":
+                    self.send_response(401)
+                    self.end_headers()
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(b'{"data":[{"id":"qwen2.5-coder-14b"}]}')
                 return
-            if self.path == "/api/v0/models/loaded":
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"data":[]}')
-                return
             self.send_response(404)
             self.end_headers()
 
         def do_POST(self):  # noqa: N802
-            if self.path == "/api/v0/models/load":
+            auth = self.headers.get("Authorization", "")
+            if auth != "Bearer lm-token":
+                self.send_response(401)
+                self.end_headers()
+                return
+            if self.path == "/api/v1/models/load":
+                body = self.rfile.read(int(self.headers.get("Content-Length", "0") or "0")).decode("utf-8")
+                assert '"model": "qwen2.5-coder-14b"' in body
+                assert '"context_length": 8192' in body
+                assert '"flash_attention": true' in body
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b'{"status":"loading"}')
+                self.wfile.write(b'{"status":"loaded","instance_id":"qwen2.5-coder-14b"}')
                 return
-            if self.path == "/api/v0/models/unload":
+            if self.path == "/api/v1/models/unload":
+                body = self.rfile.read(int(self.headers.get("Content-Length", "0") or "0")).decode("utf-8")
+                assert '"instance_id": "qwen2.5-coder-14b"' in body
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -341,7 +357,8 @@ def test_lmstudio_runtime_management_updates_actual_context_profile() -> None:
             id=uuid4(),
             name="LM Studio",
             kind=ProviderKind.LM_STUDIO,
-            base_url=f"http://127.0.0.1:{server.server_port}/v1",
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            api_key="lm-token",
             default_model="qwen2.5-coder-14b",
         )
         asyncio.run(registry.upsert(provider))
@@ -352,12 +369,16 @@ def test_lmstudio_runtime_management_updates_actual_context_profile() -> None:
                     model_id="qwen2.5-coder-14b",
                     context_length=8192,
                     parallel_slots=1,
+                    flash_attention=True,
                 ),
             )
         )
         model = next(item for item in response.models if item["model_id"] == "qwen2.5-coder-14b")
         assert model["context_window_tokens"] == 8192
         assert model["runtime_status"] == "loaded"
+        unloaded = asyncio.run(service.lmstudio_unload_model(provider.id, model_id="qwen2.5-coder-14b"))
+        model2 = next(item for item in unloaded.models if item["model_id"] == "qwen2.5-coder-14b")
+        assert model2["runtime_status"] == "unloaded"
     finally:
         if previous is None:
             os.environ.pop("ENABLE_LOCAL_MODEL_MANAGEMENT", None)
@@ -402,3 +423,79 @@ def test_assign_agent_model_updates_provider_mapping() -> None:
     asyncio.run(registry.upsert(provider))
     updated = asyncio.run(service.assign_agent_model(provider.id, agent_name="architect", request=ProviderModelAssignRequest(model_id="model-b")))
     assert updated.provider["agent_models"]["architect"] == "model-b"
+
+
+def test_lmstudio_missing_token_blocks_before_call() -> None:
+    import asyncio
+
+    registry = ProviderRegistry()
+    previous = os.environ.get("ENABLE_LOCAL_MODEL_MANAGEMENT")
+    os.environ["ENABLE_LOCAL_MODEL_MANAGEMENT"] = "true"
+    try:
+        service = ProviderApplicationService(registry)
+        provider = ProviderConfig(
+            id=uuid4(),
+            name="LM Studio",
+            kind=ProviderKind.LM_STUDIO,
+            base_url="http://localhost:1234",
+            default_model="qwen",
+        )
+        asyncio.run(registry.upsert(provider))
+        try:
+            asyncio.run(service.lmstudio_runtime_models(provider.id))
+            assert False, "expected token missing error"
+        except ValueError as exc:
+            assert "lm_studio_token_missing" in str(exc)
+    finally:
+        if previous is None:
+            os.environ.pop("ENABLE_LOCAL_MODEL_MANAGEMENT", None)
+        else:
+            os.environ["ENABLE_LOCAL_MODEL_MANAGEMENT"] = previous
+
+
+def test_lmstudio_401_maps_to_token_rejected() -> None:
+    import asyncio
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/api/v1/models":
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"unauthorized"}')
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format, *args):  # noqa: A003
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    previous = os.environ.get("ENABLE_LOCAL_MODEL_MANAGEMENT")
+    os.environ["ENABLE_LOCAL_MODEL_MANAGEMENT"] = "true"
+    try:
+        registry = ProviderRegistry()
+        service = ProviderApplicationService(registry)
+        provider = ProviderConfig(
+            id=uuid4(),
+            name="LM Studio",
+            kind=ProviderKind.LM_STUDIO,
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            api_key="bad-token",
+            default_model="qwen",
+        )
+        asyncio.run(registry.upsert(provider))
+        try:
+            asyncio.run(service.lmstudio_runtime_models(provider.id))
+            assert False, "expected token rejection"
+        except ValueError as exc:
+            assert "lm_studio_token_rejected" in str(exc)
+    finally:
+        if previous is None:
+            os.environ.pop("ENABLE_LOCAL_MODEL_MANAGEMENT", None)
+        else:
+            os.environ["ENABLE_LOCAL_MODEL_MANAGEMENT"] = previous
+        server.shutdown()
+        server.server_close()

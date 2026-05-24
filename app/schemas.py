@@ -109,6 +109,8 @@ class LMStudioLoadModelRequest(ApiModel):
     gpu_offload: int | None = None
     temperature: float | None = None
     streaming_enabled: bool | None = None
+    flash_attention: bool = True
+    echo_load_config: bool = True
 
 
 class LMStudioUnloadModelRequest(ApiModel):

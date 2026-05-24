@@ -22,3 +22,9 @@ def test_provider_has_per_agent_overrides_section() -> None:
     assert "Use default" in text
     assert "parser_strategy" in text
     assert "compact_mode_enabled" in text
+
+
+def test_provider_ui_shows_lmstudio_load_unload_token_errors() -> None:
+    text = Path("frontend/features/providers/provider-management.tsx").read_text(encoding="utf-8")
+    assert "LM Studio API token is required for model listing/loading/unloading." in text
+    assert "LM Studio rejected the API token." in text

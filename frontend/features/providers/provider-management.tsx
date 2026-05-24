@@ -57,6 +57,8 @@ export function ProviderManagement({
   const [loadedFilterByProvider, setLoadedFilterByProvider] = useState<Record<string, "all" | "loaded" | "unloaded">>({});
   const [runtimeContextByProvider, setRuntimeContextByProvider] = useState<Record<string, string>>({});
   const [runtimeParallelByProvider, setRuntimeParallelByProvider] = useState<Record<string, string>>({});
+  const [flashAttentionByProvider, setFlashAttentionByProvider] = useState<Record<string, boolean>>({});
+  const [runtimeBusyByProvider, setRuntimeBusyByProvider] = useState<Record<string, boolean>>({});
   const [agentOverridesByProvider, setAgentOverridesByProvider] = useState<Record<string, Record<string, AgentOverride>>>({});
   const active = providerItems.filter((provider) => provider.status === "active");
 
@@ -214,11 +216,19 @@ export function ProviderManagement({
           <div className="flex items-end gap-2">
             {isLocalProvider(provider.kind) ? (
               <>
-                <Button variant="outline" size="sm" onClick={() => void loadRuntimeModel(provider.id)}>
-                  Load model
+                <label className="flex items-center gap-1 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={flashAttentionByProvider[provider.id] ?? true}
+                    onChange={(event) => setFlashAttentionByProvider((current) => ({ ...current, [provider.id]: event.target.checked }))}
+                  />
+                  Flash attention
+                </label>
+                <Button variant="outline" size="sm" disabled={Boolean(runtimeBusyByProvider[provider.id])} onClick={() => void loadRuntimeModel(provider.id)}>
+                  {runtimeBusyByProvider[provider.id] ? "Loading..." : "Load model"}
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => void unloadRuntimeModel(provider.id)}>
-                  Unload
+                <Button variant="outline" size="sm" disabled={Boolean(runtimeBusyByProvider[provider.id])} onClick={() => void unloadRuntimeModel(provider.id)}>
+                  {runtimeBusyByProvider[provider.id] ? "Working..." : "Unload"}
                 </Button>
               </>
             ) : (
@@ -535,17 +545,29 @@ export function ProviderManagement({
     if (!modelId) return;
     const contextLength = parseInt(runtimeContextByProvider[providerId] ?? "0", 10) || null;
     const parallel = parseInt(runtimeParallelByProvider[providerId] ?? "1", 10) || 1;
-    const response = await fetch(`${apiBaseUrl}/providers/${providerId}/runtime-models/load`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ model_id: modelId, context_length: contextLength, parallel_slots: parallel }),
-    });
-    if (!response.ok) {
-      setMessage(`Load failed: ${await extractError(response)}`);
-      return;
+    setRuntimeBusyByProvider((current) => ({ ...current, [providerId]: true }));
+    try {
+      const response = await fetch(`${apiBaseUrl}/providers/${providerId}/runtime-models/load`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          model_id: modelId,
+          context_length: contextLength,
+          parallel_slots: parallel,
+          flash_attention: flashAttentionByProvider[providerId] ?? true,
+          echo_load_config: true,
+        }),
+      });
+      if (!response.ok) {
+        const error = await extractError(response);
+        setMessage(error.includes("lm_studio_token_missing") ? "LM Studio API token is required for model listing/loading/unloading." : error.includes("lm_studio_token_rejected") ? "LM Studio rejected the API token." : `Load failed: ${error}`);
+        return;
+      }
+      await refreshProviders();
+      setMessage(`Loaded ${modelId}.`);
+    } finally {
+      setRuntimeBusyByProvider((current) => ({ ...current, [providerId]: false }));
     }
-    await refreshProviders();
-    setMessage(`Loaded ${modelId}.`);
   }
 
   async function unloadRuntimeModel(providerId: string): Promise<void> {
@@ -553,17 +575,23 @@ export function ProviderManagement({
     if (!apiBaseUrl) return;
     const modelId = selectedModelsByProvider[providerId];
     if (!modelId) return;
-    const response = await fetch(`${apiBaseUrl}/providers/${providerId}/runtime-models/unload`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ model_id: modelId }),
-    });
-    if (!response.ok) {
-      setMessage(`Unload failed: ${await extractError(response)}`);
-      return;
+    setRuntimeBusyByProvider((current) => ({ ...current, [providerId]: true }));
+    try {
+      const response = await fetch(`${apiBaseUrl}/providers/${providerId}/runtime-models/unload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ model_id: modelId }),
+      });
+      if (!response.ok) {
+        const error = await extractError(response);
+        setMessage(error.includes("lm_studio_token_missing") ? "LM Studio API token is required for model listing/loading/unloading." : error.includes("lm_studio_token_rejected") ? "LM Studio rejected the API token." : `Unload failed: ${error}`);
+        return;
+      }
+      await refreshProviders();
+      setMessage(`Unloaded ${modelId}.`);
+    } finally {
+      setRuntimeBusyByProvider((current) => ({ ...current, [providerId]: false }));
     }
-    await refreshProviders();
-    setMessage(`Unloaded ${modelId}.`);
   }
 
   async function testConnection(): Promise<void> {

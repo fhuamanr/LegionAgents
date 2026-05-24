@@ -1,4 +1,4 @@
-"""LM Studio REST API client for local runtime management."""
+"""LM Studio REST API v1 client for local runtime management."""
 
 from __future__ import annotations
 
@@ -6,10 +6,41 @@ import json
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+
+class LMStudioClientError(ValueError):
+    """Structured LM Studio client error."""
+
+    def __init__(
+        self,
+        *,
+        code: str,
+        endpoint: str,
+        status_code: int | None = None,
+        response_body: str | None = None,
+        suggested_action: str | None = None,
+    ) -> None:
+        self.code = code
+        self.endpoint = endpoint
+        self.status_code = status_code
+        self.response_body = response_body
+        self.suggested_action = suggested_action
+        super().__init__(
+            json.dumps(
+                {
+                    "error_code": code,
+                    "endpoint": endpoint,
+                    "status_code": status_code,
+                    "response_body": response_body,
+                    "suggested_action": suggested_action,
+                }
+            )
+        )
 
 
 class LMStudioClient:
-    """Thin LM Studio REST client with OpenAI-compatible fallback paths."""
+    """Strict LM Studio REST API v1 client."""
 
     def __init__(
         self,
@@ -19,80 +50,33 @@ class LMStudioClient:
         timeout_seconds: float | None = None,
         headers: dict[str, str] | None = None,
     ) -> None:
-        self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
+        self._base_url = _normalize_base_url(base_url)
+        self._api_key = (api_key or "").strip()
         self._timeout = timeout_seconds or 30
         self._headers = headers or {}
 
-    def health(self) -> dict[str, Any]:
-        payload = self.list_models()
-        return {
-            "status": "ok",
-            "models_count": len(payload.get("data", [])) if isinstance(payload, dict) else 0,
-        }
-
     def list_models(self) -> dict[str, Any]:
-        return self._request_json("GET", "/v1/models")
+        return self._request_json("GET", "/api/v1/models")
 
-    def list_loaded_models(self) -> dict[str, Any]:
-        for path in ("/api/v0/models/loaded", "/api/models/loaded", "/api/v1/models/loaded"):
-            try:
-                return self._request_json("GET", path)
-            except Exception:
-                continue
-        return {"data": []}
-
-    def load_model(self, model: str, *, context_length: int | None = None, max_output_tokens: int | None = None, parallel_slots: int | None = None, gpu_offload: int | None = None, temperature: float | None = None, streaming_enabled: bool | None = None) -> dict[str, Any]:
+    def load_model(
+        self,
+        model_id: str,
+        *,
+        context_length: int | None = None,
+        flash_attention: bool = True,
+        echo_load_config: bool = True,
+    ) -> dict[str, Any]:
         body = {
-            "model": model,
-            "identifier": model,
+            "model": model_id,
             "context_length": context_length,
-            "n_ctx": context_length,
-            "max_output_tokens": max_output_tokens,
-            "n_parallel": parallel_slots,
-            "parallel_slots": parallel_slots,
-            "gpu_offload": gpu_offload,
-            "temperature": temperature,
-            "streaming_enabled": streaming_enabled,
+            "flash_attention": flash_attention,
+            "echo_load_config": echo_load_config,
         }
         body = {key: value for key, value in body.items() if value is not None}
-        for path in ("/api/v0/models/load", "/api/models/load", "/api/v1/models/load"):
-            try:
-                return self._request_json("POST", path, body=body)
-            except Exception:
-                continue
-        raise ValueError("LM Studio load model endpoint is not available.")
+        return self._request_json("POST", "/api/v1/models/load", body=body)
 
-    def unload_model(self, model: str) -> dict[str, Any]:
-        body = {"model": model, "identifier": model}
-        for path in ("/api/v0/models/unload", "/api/models/unload", "/api/v1/models/unload"):
-            try:
-                return self._request_json("POST", path, body=body)
-            except Exception:
-                continue
-        raise ValueError("LM Studio unload model endpoint is not available.")
-
-    def download_model(self, model: str) -> dict[str, Any]:
-        body = {"model": model, "identifier": model}
-        for path in ("/api/v0/models/download", "/api/models/download", "/api/v1/models/download"):
-            try:
-                return self._request_json("POST", path, body=body)
-            except Exception:
-                continue
-        raise ValueError("LM Studio download endpoint is not available.")
-
-    def download_status(self, download_id: str | None = None, model: str | None = None) -> dict[str, Any]:
-        query = ""
-        if download_id:
-            query = f"?download_id={download_id}"
-        elif model:
-            query = f"?model={model}"
-        for path in ("/api/v0/models/downloads", "/api/models/downloads", "/api/v1/models/downloads"):
-            try:
-                return self._request_json("GET", f"{path}{query}")
-            except Exception:
-                continue
-        return {"data": []}
+    def unload_model(self, instance_id: str) -> dict[str, Any]:
+        return self._request_json("POST", "/api/v1/models/unload", body={"instance_id": instance_id})
 
     def chat_completion(self, *, model: str, messages: list[dict[str, str]], stream: bool = False, max_tokens: int | None = None) -> dict[str, Any]:
         body: dict[str, Any] = {"model": model, "messages": messages, "stream": stream}
@@ -101,13 +85,17 @@ class LMStudioClient:
         return self._request_json("POST", "/v1/chat/completions", body=body)
 
     def _request_json(self, method: str, path: str, *, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        if not self._api_key:
+            raise LMStudioClientError(
+                code="lm_studio_token_missing",
+                endpoint=f"{self._base_url}{path}",
+                suggested_action="LM Studio API token is required for model listing/loading/unloading.",
+            )
         url = f"{self._base_url}{path}"
         request_body = None if body is None else json.dumps(body).encode("utf-8")
-        headers = {"Accept": "application/json", **self._headers}
+        headers = {"Accept": "application/json", **self._headers, "Authorization": f"Bearer {self._api_key}"}
         if request_body is not None:
             headers["Content-Type"] = "application/json"
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
         request = urllib.request.Request(url, data=request_body, headers=headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
@@ -115,4 +103,41 @@ class LMStudioClient:
                 return json.loads(payload)
         except urllib.error.HTTPError as exc:
             body_text = exc.read().decode("utf-8", errors="ignore")
-            raise ValueError(f"LM Studio request failed: {exc.code} {body_text or exc.reason}") from exc
+            if exc.code == 401:
+                raise LMStudioClientError(
+                    code="lm_studio_token_rejected",
+                    endpoint=url,
+                    status_code=exc.code,
+                    response_body=body_text,
+                    suggested_action="LM Studio rejected the API token.",
+                ) from exc
+            code = {
+                "/api/v1/models": "lm_studio_list_failed",
+                "/api/v1/models/load": "lm_studio_load_failed",
+                "/api/v1/models/unload": "lm_studio_unload_failed",
+            }.get(path, "lm_studio_endpoint_unavailable")
+            raise LMStudioClientError(
+                code=code,
+                endpoint=url,
+                status_code=exc.code,
+                response_body=body_text,
+                suggested_action="Validate LM Studio endpoint availability and payload compatibility.",
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise LMStudioClientError(
+                code="lm_studio_endpoint_unavailable",
+                endpoint=url,
+                response_body=str(exc),
+                suggested_action="Verify LM Studio base URL and that REST API server is running.",
+            ) from exc
+
+
+def _normalize_base_url(value: str) -> str:
+    raw = value.strip().rstrip("/")
+    parsed = urlsplit(raw)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/api/v1"):
+        path = path[: -len("/api/v1")]
+    elif path.endswith("/v1"):
+        path = path[: -len("/v1")]
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")

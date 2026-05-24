@@ -147,6 +147,8 @@ class ProviderApplicationService:
             gpu_offload=request.gpu_offload,
             temperature=request.temperature,
             streaming_enabled=request.streaming_enabled,
+            flash_attention=request.flash_attention,
+            echo_load_config=request.echo_load_config,
         )
         provider = await self._registry.get(provider_id)
         if provider is None:

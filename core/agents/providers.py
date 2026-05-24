@@ -338,9 +338,11 @@ class ProviderRegistry:
             raise ValueError(f"Configured provider was not found: {provider_id}")
         self._require_local_runtime_provider(provider)
         client = self._lmstudio_client(provider)
-        available = client.list_models()
-        loaded = client.list_loaded_models()
-        return {"available": available, "loaded": loaded}
+        try:
+            available = client.list_models()
+            return {"available": available, "loaded": {"data": []}}
+        except ValueError as exc:
+            raise ValueError(_lmstudio_error_with_provider(provider_id, str(exc))) from exc
 
     async def lmstudio_load_model(
         self,
@@ -353,21 +355,23 @@ class ProviderRegistry:
         gpu_offload: int | None = None,
         temperature: float | None = None,
         streaming_enabled: bool | None = None,
+        flash_attention: bool = True,
+        echo_load_config: bool = True,
     ) -> ModelCapabilityProfile:
         provider = await self.get(provider_id)
         if provider is None:
             raise ValueError(f"Configured provider was not found: {provider_id}")
         self._require_local_runtime_provider(provider)
         client = self._lmstudio_client(provider)
-        client.load_model(
-            model_id,
-            context_length=context_length,
-            max_output_tokens=max_output_tokens,
-            parallel_slots=parallel_slots,
-            gpu_offload=gpu_offload,
-            temperature=temperature,
-            streaming_enabled=streaming_enabled,
-        )
+        try:
+            load_response = client.load_model(
+                model_id,
+                context_length=context_length,
+                flash_attention=flash_attention,
+                echo_load_config=echo_load_config,
+            )
+        except ValueError as exc:
+            raise ValueError(_lmstudio_error_with_provider(provider_id, str(exc))) from exc
         loaded_at = datetime.now(timezone.utc)
         context_window = int(context_length or provider.context_window_tokens or 4096)
         output_max = int(max_output_tokens or provider.max_output_tokens or provider.reserved_output_tokens or 1024)
@@ -378,7 +382,7 @@ class ProviderRegistry:
                 "provider_id": provider.id,
                 "provider_type": provider.kind.value,
                 "model_id": model_id,
-                "loaded_model_id": model_id,
+                "loaded_model_id": str(load_response.get("instance_id") or load_response.get("id") or model_id),
                 "context_window_tokens": context_window,
                 "max_input_tokens": max_input,
                 "max_output_tokens": output_max,
@@ -397,12 +401,16 @@ class ProviderRegistry:
             **provider.metadata,
             "lmstudio_runtime": {
                 "last_loaded_model": model_id,
+                "loaded_instance_id": str(load_response.get("instance_id") or load_response.get("id") or model_id),
                 "context_length": context_window,
                 "max_output_tokens": output_max,
                 "parallel_slots": parallel_slots,
                 "gpu_offload": gpu_offload,
                 "temperature": temperature,
                 "streaming_enabled": streaming_enabled,
+                "flash_attention": flash_attention,
+                "echo_load_config": echo_load_config,
+                "load_response": load_response,
             },
         }
         await self.upsert(
@@ -424,7 +432,12 @@ class ProviderRegistry:
             raise ValueError(f"Configured provider was not found: {provider_id}")
         self._require_local_runtime_provider(provider)
         client = self._lmstudio_client(provider)
-        client.unload_model(model_id)
+        runtime_meta = provider.metadata.get("lmstudio_runtime", {}) if isinstance(provider.metadata.get("lmstudio_runtime", {}), dict) else {}
+        instance_id = str(runtime_meta.get("loaded_instance_id") or model_id)
+        try:
+            client.unload_model(instance_id)
+        except ValueError as exc:
+            raise ValueError(_lmstudio_error_with_provider(provider_id, str(exc))) from exc
         current = provider.model_profiles.get(model_id) or _default_model_profile(provider, model_id, detection_source="manual")
         updated = current.model_copy(
             update={
@@ -441,20 +454,10 @@ class ProviderRegistry:
         return updated
 
     async def lmstudio_download_model(self, provider_id: UUID, *, model_id: str) -> dict[str, Any]:
-        provider = await self.get(provider_id)
-        if provider is None:
-            raise ValueError(f"Configured provider was not found: {provider_id}")
-        self._require_local_runtime_provider(provider)
-        client = self._lmstudio_client(provider)
-        return client.download_model(model_id)
+        raise ValueError("lm_studio_endpoint_unavailable")
 
     async def lmstudio_download_status(self, provider_id: UUID, *, download_id: str | None = None, model: str | None = None) -> dict[str, Any]:
-        provider = await self.get(provider_id)
-        if provider is None:
-            raise ValueError(f"Configured provider was not found: {provider_id}")
-        self._require_local_runtime_provider(provider)
-        client = self._lmstudio_client(provider)
-        return client.download_status(download_id=download_id, model=model)
+        raise ValueError("lm_studio_endpoint_unavailable")
 
     async def refresh_models(self, provider_id: UUID) -> tuple[ModelCapabilityProfile, ...]:
         provider = await self.get(provider_id)
@@ -536,16 +539,6 @@ class ProviderRegistry:
     async def _discover_lm_studio_models(self, provider: ProviderConfig) -> tuple[ModelCapabilityProfile, ...]:
         client = self._lmstudio_client(provider)
         payload = client.list_models()
-        loaded_payload = client.list_loaded_models()
-        loaded_ids: set[str] = set()
-        for key in ("data", "models", "loaded"):
-            rows = loaded_payload.get(key, []) if isinstance(loaded_payload, dict) else []
-            if isinstance(rows, list):
-                for item in rows:
-                    if isinstance(item, dict):
-                        mid = str(item.get("id") or item.get("model") or item.get("identifier") or "").strip()
-                        if mid:
-                            loaded_ids.add(mid)
         data = payload.get("data", []) if isinstance(payload, dict) else []
         profiles: list[ModelCapabilityProfile] = []
         if isinstance(data, list):
@@ -557,13 +550,14 @@ class ProviderRegistry:
                     continue
                 profile = _default_model_profile(provider, model_id, detection_source="discovered")
                 context_window = int(item.get("context_length") or item.get("n_ctx") or provider.context_window_tokens or profile.context_window_tokens)
+                loaded_flag = bool(item.get("loaded")) if isinstance(item.get("loaded"), bool) else False
                 profile = profile.model_copy(
                     update={
                         "display_name": str(item.get("display_name") or item.get("name") or model_id),
                         "context_window_tokens": context_window,
                         "max_input_tokens": max(256, context_window - int(profile.max_output_tokens) - 300),
-                        "loaded_model_id": model_id if model_id in loaded_ids else None,
-                        "runtime_status": "loaded" if model_id in loaded_ids else "unloaded",
+                        "loaded_model_id": model_id if loaded_flag else None,
+                        "runtime_status": "loaded" if loaded_flag else "unknown",
                         "local_runtime_managed_by_platform": True,
                         "last_health_check_at": datetime.now(timezone.utc),
                         "compact_mode_required": context_window <= 8192,
@@ -578,8 +572,6 @@ class ProviderRegistry:
         if not provider.base_url:
             raise ValueError("LM Studio base URL is required.")
         base = provider.base_url.rstrip("/")
-        if base.endswith("/v1"):
-            base = base[: -len("/v1")]
         return LMStudioClient(
             base_url=base,
             api_key=provider.api_key,
@@ -741,6 +733,13 @@ def _stable_provider_id(name: str) -> UUID:
 def _connectivity_url(provider: ProviderConfig) -> str:
     if provider.kind == ProviderKind.OPENAI:
         base = provider.base_url or "https://api.openai.com/v1"
+    elif provider.kind in {ProviderKind.LM_STUDIO, ProviderKind.LOCAL_LM_STUDIO}:
+        base = (provider.base_url or "").rstrip("/")
+        if base.endswith("/v1"):
+            base = base[: -len("/v1")]
+        if base.endswith("/api/v1"):
+            base = base[: -len("/api/v1")]
+        return f"{base}/api/v1/models"
     elif provider.kind in {ProviderKind.OLLAMA, ProviderKind.LM_STUDIO, ProviderKind.LOCAL_LM_STUDIO, ProviderKind.CUSTOM, ProviderKind.OPENROUTER, ProviderKind.CURSOR, ProviderKind.LOCAL}:
         base = provider.base_url or ""
     else:
@@ -817,3 +816,14 @@ def _resolve_profile(provider: ProviderConfig, model_name: str) -> ModelCapabili
     if provider.default_model and provider.default_model in provider.model_profiles:
         return provider.model_profiles[provider.default_model]
     return None
+
+
+def _lmstudio_error_with_provider(provider_id: UUID, raw: str) -> str:
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            payload["provider_id"] = str(provider_id)
+            return json.dumps(payload)
+    except Exception:  # noqa: BLE001
+        pass
+    return raw
