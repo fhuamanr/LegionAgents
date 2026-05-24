@@ -84,6 +84,7 @@ class ExecutionService:
         }
         self._ingestion = StoryIngestionPipeline()
         self._upload_root = Path(os.getenv("UPLOAD_ROOT", "outputs/uploads")).resolve()
+        self._local_safe_mode_semaphore = asyncio.Semaphore(1)
 
     async def upload_user_story(self, request: UserStoryUploadRequest) -> UploadResponse:
         upload = StoredUpload(
@@ -184,12 +185,15 @@ class ExecutionService:
 
     async def _execute_workflow(self, workflow_id: UUID, request: TriggerWorkflowRequest) -> WorkflowResponse:
         metadata: dict[str, Any] = dict(request.metadata)
+        local_safe_mode = str(os.getenv("LOCAL_LM_STUDIO_SAFE_MODE", "")).strip().lower() in {"1", "true", "yes", "on"}
+        metadata.setdefault("local_lm_studio_safe_mode", local_safe_mode)
         if request.upload_id:
             metadata["upload_id"] = str(request.upload_id)
         progress_hook = metadata.pop("progress_hook", None)
         runtime = LangGraphExecutionRuntime(
             repository=self.workflow_repository,
             model_client=self._model_client,
+            execution_owner="backend",
             event_hook=self._runtime_event_hook(
                 workflow_id,
                 request.thread_id,
@@ -197,11 +201,19 @@ class ExecutionService:
             ),
             token_callback=self._token_callback(),
         )
-        result = await runtime.start(
-            request.task,
-            workflow_id=workflow_id,
-            metadata=metadata,
-        )
+        if local_safe_mode:
+            async with self._local_safe_mode_semaphore:
+                result = await runtime.start(
+                    request.task,
+                    workflow_id=workflow_id,
+                    metadata=metadata,
+                )
+        else:
+            result = await runtime.start(
+                request.task,
+                workflow_id=workflow_id,
+                metadata=metadata,
+            )
         workflow = self._workflows[workflow_id]
         final_workflow = workflow.model_copy(
             update={
@@ -247,10 +259,16 @@ class ExecutionService:
         runtime = LangGraphExecutionRuntime(
             repository=self.workflow_repository,
             model_client=self._model_client,
+            execution_owner="backend",
             event_hook=self._runtime_event_hook(workflow_id, workflow.thread_id, progress_hook),
             token_callback=self._token_callback(),
         )
-        result = await runtime.recover(UUID(str(execution_id)))
+        local_safe_mode = bool(workflow.metadata.get("local_lm_studio_safe_mode", False))
+        if local_safe_mode:
+            async with self._local_safe_mode_semaphore:
+                result = await runtime.recover(UUID(str(execution_id)))
+        else:
+            result = await runtime.recover(UUID(str(execution_id)))
         updated = workflow.model_copy(
             update={
                 "status": self._workflow_status_from_run(result.status),
@@ -314,11 +332,12 @@ class ExecutionService:
     async def get_execution_status(self, workflow_id: UUID) -> ExecutionStatusResponse:
         workflow = await self.get_workflow(workflow_id)
         progress = await self.tracker.get(workflow_id)
+        events = await self.event_bus.history(workflow_id=workflow_id)
         return ExecutionStatusResponse(
             workflow_id=workflow_id,
             status=workflow.status,
             active_agent=progress.active_agent if progress else None,
-            progress_percent=progress.percent if progress else 0.0,
+            progress_percent=self._compute_progress_percent(workflow, events, progress.active_agent if progress else None),
             metadata=workflow.metadata,
         )
 
@@ -337,11 +356,12 @@ class ExecutionService:
         progress = await self.tracker.get(workflow_id)
         now = datetime.now(timezone.utc)
         nodes = self._telemetry_nodes(events, now)
+        progress_percent = self._compute_progress_percent(workflow, events, progress.active_agent if progress else None)
         return WorkflowTelemetryResponse(
             workflow_id=workflow_id,
             status=workflow.status,
             active_agent=progress.active_agent if progress else None,
-            progress_percent=progress.percent if progress else 0.0,
+            progress_percent=progress_percent,
             duration_ms=self._duration_ms(workflow.created_at, now),
             nodes=nodes,
             edges=self._telemetry_edges(),
@@ -352,6 +372,7 @@ class ExecutionService:
                 "retry_count": sum(1 for event in events if event.type == ExecutionEventType.RETRY_STARTED),
                 "qa_loop_count": sum(1 for event in events if event.type == ExecutionEventType.QA_FAILED),
                 "websocket_channel": f"/ws/executions/{workflow_id}",
+                "stage_label": self._stage_label(progress.active_agent if progress else None, workflow.status),
             },
         )
 
@@ -492,6 +513,22 @@ class ExecutionService:
             message=f"{self._agent_labels.get(agent_name, agent_name)} generated output.",
             payload=payload,
         )
+        validation_meta = payload["metadata"].get("validation", {}) if isinstance(payload["metadata"], dict) else {}
+        if validation_meta.get("sanitization_applied"):
+            await self.emitter.emit(
+                ExecutionEventType.TELEMETRY_RECORDED,
+                workflow_id=workflow_id,
+                execution_id=state.get("execution_id"),
+                thread_id=thread_id,
+                agent_name=agent_name,
+                message="output_sanitized",
+                payload={
+                    "event": "output_sanitized",
+                    "agent": agent_name,
+                    "schema_name": validation_meta.get("schema_name"),
+                    "fields_removed": validation_meta.get("fields_removed", []),
+                },
+            )
         if agent_name == "qa":
             passed = bool(payload["metadata"].get("passed"))
             await self.emitter.emit(
@@ -516,10 +553,22 @@ class ExecutionService:
             for key, value in dict(state.get("metadata", {})).items()
             if not callable(value) and not str(key).startswith("_")
         }
+        attempts = dict(state.get("attempts", {}))
+        snapshot = None
+        workflow_state = state.get("workflow_state")
+        if workflow_state and agent_name:
+            snapshot = getattr(workflow_state, "agent_states", {}).get(agent_name)
         return {
-            "attempts": state.get("attempts", {}),
+            "attempts": attempts,
             "status": state.get("status"),
             "active_agent": agent_name or None,
+            "workflow_id": str(state["workflow_state"].workflow_id) if state.get("workflow_state") else None,
+            "agent": agent_name or None,
+            "attempt": attempts.get(agent_name, 0) if agent_name else 0,
+            "execution_owner": metadata.get("execution_owner"),
+            "provider_call_id": metadata.get("provider_call_id"),
+            "agent_error_type": getattr(snapshot, "metadata", {}).get("error_type") if snapshot else None,
+            "agent_errors": list(getattr(snapshot, "errors", tuple())) if snapshot else [],
             "metadata": metadata,
         }
 
@@ -575,6 +624,51 @@ class ExecutionService:
         if status == WorkflowRunStatus.RUNNING:
             return WorkflowStatus.RUNNING
         return WorkflowStatus.FAILED
+
+    def _compute_progress_percent(
+        self,
+        workflow: WorkflowResponse,
+        events: tuple[Any, ...],
+        active_agent: str | None,
+    ) -> float:
+        ba_only = str(workflow.metadata.get("workflow_mode", workflow.metadata.get("workflow_type", ""))).lower() in {"ba_only", "ba-only"}
+        if ba_only:
+            if workflow.status in {WorkflowStatus.COMPLETED}:
+                return 100.0
+            if active_agent == "ba":
+                return 50.0
+            return 0.0
+        completed_agents = {
+            event.agent_name
+            for event in events
+            if event.type in {ExecutionEventType.AGENT_COMPLETED, ExecutionEventType.DOCS_GENERATED, ExecutionEventType.PR_GENERATED}
+        }
+        if workflow.status == WorkflowStatus.COMPLETED:
+            return 100.0
+        if "pr" in completed_agents:
+            return 100.0
+        if "docs" in completed_agents:
+            return 90.0
+        if "qa" in completed_agents:
+            return 75.0
+        if "developer" in completed_agents:
+            return 60.0
+        if "architect" in completed_agents:
+            return 40.0
+        if "ba" in completed_agents:
+            return 20.0
+        if active_agent == "ba":
+            return 10.0
+        return 0.0
+
+    def _stage_label(self, active_agent: str | None, status: WorkflowStatus) -> str:
+        if status == WorkflowStatus.FAILED:
+            return "Failed"
+        if status == WorkflowStatus.COMPLETED:
+            return "Completed"
+        if active_agent:
+            return f"{active_agent} running"
+        return "Created"
 
     def _telemetry_nodes(
         self,

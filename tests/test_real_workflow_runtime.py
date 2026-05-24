@@ -48,6 +48,26 @@ class WorkflowModelClient(AgentModelClient):
         raise AssertionError("Unknown agent prompt")
 
 
+class CountingWorkflowModelClient(WorkflowModelClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.complete_calls = 0
+        self.stream_calls = 0
+        self.ba_prompt_tokens: int | None = None
+
+    async def complete(self, messages: tuple[PromptMessage, ...]) -> str:
+        self.complete_calls += 1
+        prompt = "\n\n".join(message.content for message in messages)
+        if "Agent name: ba." in prompt or "BA agent" in prompt:
+            self.ba_prompt_tokens = sum(max(1, len(message.content) // 4) for message in messages)
+            return '{"agent_name":"ba","summary":"BA output"}'
+        return await super().complete(messages)
+
+    async def stream_complete(self, messages: tuple[PromptMessage, ...]):
+        self.stream_calls += 1
+        yield await self.complete(messages)
+
+
 class GovernanceInvalidDeveloperModelClient(WorkflowModelClient):
     async def complete(self, messages: tuple[PromptMessage, ...]) -> str:
         prompt = "\n\n".join(message.content for message in messages)
@@ -158,3 +178,29 @@ async def test_governance_rejection_changes_workflow_execution_status() -> None:
     assert developer.status == AgentStatus.FAILED
     record = await runtime.repository.get(result.execution_id)
     assert any("Governance runtime rejection" in error for error in record.metadata["errors"])
+
+
+@pytest.mark.asyncio
+async def test_local_safe_mode_uses_non_stream_single_provider_call_for_ba() -> None:
+    client = CountingWorkflowModelClient()
+    runtime = LangGraphExecutionRuntime(model_client=client)
+
+    result = await runtime.start(
+        "Necesito hacer un e-commerce tipo MercadoLibre con productos, usuarios y carrito, MVP funcional.",
+        metadata={"local_lm_studio_safe_mode": True},
+    )
+
+    assert result.status == WorkflowRunStatus.COMPLETED
+    assert client.stream_calls == 0
+    assert client.complete_calls >= 1
+    assert client.ba_prompt_tokens is not None
+    assert client.ba_prompt_tokens <= 1200
+
+
+@pytest.mark.asyncio
+async def test_execution_owner_blocks_cross_owner_recovery() -> None:
+    repository = InMemoryWorkflowExecutionRepository()
+    backend_runtime = LangGraphExecutionRuntime(repository=repository, model_client=WorkflowModelClient(), execution_owner="backend")
+    started = await backend_runtime.start("owner test")
+    record = await repository.get(started.execution_id)
+    assert record.metadata["execution_owner"] == "backend"

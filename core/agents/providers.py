@@ -185,6 +185,7 @@ class ProviderRegistry:
         provider_id: UUID | str | None = None,
         model: str | None = None,
         agent_models: dict[str, str] | None = None,
+        local_lm_studio_safe_mode: bool = False,
     ) -> AgentModelClient:
         provider = await self.get(UUID(str(provider_id))) if provider_id else await self.active()
         if provider is None:
@@ -200,6 +201,7 @@ class ProviderRegistry:
         profile = _resolve_profile(provider, model_name)
         reserved_output = provider.reserved_output_tokens or provider.max_output_tokens or 1024
         max_prompt_tokens = provider.max_prompt_tokens
+        timeout_seconds = provider.timeout_seconds
         supports_json_schema = bool(provider.capabilities.get("supports_json_schema", False))
         if profile is not None:
             reserved_output = profile.max_output_tokens
@@ -215,11 +217,16 @@ class ProviderRegistry:
                 profile.compact_mode_required,
                 profile.detection_source,
             )
+        if local_lm_studio_safe_mode and provider.kind == ProviderKind.LM_STUDIO:
+            timeout_seconds = max(float(timeout_seconds or 60), 180.0)
+            if agent_name == "ba":
+                max_prompt_tokens = min(int(max_prompt_tokens or 1200), 1200)
+                reserved_output = min(int(reserved_output or 700), 700)
         return OpenAICompatibleChatModelClient(
             model=model_name,
             api_key=provider.api_key or _local_api_key(provider),
             base_url=provider.base_url,
-            timeout_seconds=provider.timeout_seconds,
+            timeout_seconds=timeout_seconds,
             response_format_mode=str(provider.capabilities.get("response_format_mode", "text")),
             supports_json_schema=supports_json_schema,
             supports_text_response_format=bool(provider.capabilities.get("supports_text_response_format", True)),
@@ -417,6 +424,7 @@ class RoutingModelClient(AgentModelClient):
             provider_id=metadata.get("provider_id"),
             model=metadata.get("model") or metadata.get(f"{agent_name}_model"),
             agent_models=agent_models if isinstance(agent_models, dict) else None,
+            local_lm_studio_safe_mode=bool(metadata.get("local_lm_studio_safe_mode", False)),
         )
 
 

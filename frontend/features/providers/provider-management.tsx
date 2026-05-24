@@ -81,6 +81,9 @@ export function ProviderManagement({
           <p className="mt-2 text-xs text-muted-foreground">
             LM Studio in Docker: use <code>http://host.docker.internal:1234/v1</code> (not <code>http://127.0.0.1:1234/v1</code>). Small local models may require compact workflow mode.
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            32GB RAM guidance: prefer Qwen2.5-Coder 7B/14B Q4_K_M, set <code>n_parallel=1</code>, use <code>n_ctx=8192</code> when stable (fallback 4096), keep compact BA prompts, avoid 24B dense models, and use cloud/OpenRouter for full multi-agent workflows when local stability is low.
+          </p>
         </CardContent>
       </Card>
 

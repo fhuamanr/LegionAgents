@@ -62,6 +62,7 @@ class LangGraphExecutionRuntime:
         event_hook: WorkflowEventHook | None = None,
         token_callback: Callable[[UUID, UUID, str, str], Awaitable[None]] | None = None,
         compiled_graph: CompiledStateGraph | None = None,
+        execution_owner: str = "backend",
     ) -> None:
         self._agent_runtimes = agent_runtimes or build_default_agent_runtimes(
             project_root=project_root,
@@ -73,6 +74,7 @@ class LangGraphExecutionRuntime:
         self._event_hook = event_hook
         self._token_callback = token_callback
         self._compiled_graph = compiled_graph
+        self._execution_owner = execution_owner
 
     @property
     def repository(self) -> WorkflowExecutionRepository:
@@ -103,7 +105,7 @@ class LangGraphExecutionRuntime:
             status=WorkflowRunStatus.RUNNING,
             started_at=datetime.now(timezone.utc),
             next_agent=DEFAULT_DELIVERY_SEQUENCE[0],
-            metadata=metadata or {},
+            metadata={**(metadata or {}), "execution_owner": self._execution_owner},
         )
         await self._repository.create(record)
         initial_state: RealWorkflowRuntimeState = {
@@ -236,13 +238,50 @@ class LangGraphExecutionRuntime:
                 **({"token_callback": self._token_callback} if self._token_callback is not None else {}),
                 "agent_attempt": attempts[agent_name],
                 "workflow_attempts": attempts,
+                "execution_owner": self._execution_owner,
             },
         )
+        provider_call_id = f"{execution_id}:{agent_name}:attempt:{attempts[agent_name]}"
+        if not await self._acquire_agent_lock(execution_id, workflow_state.workflow_id, agent_name):
+            result = AgentExecutionResult(
+                execution_id=execution_id,
+                agent_name=agent_name,
+                status=AgentStatus.FAILED,
+                errors=(f"Agent execution lock denied for owner={self._execution_owner}.",),
+                metadata={"route_signal": "fail"},
+            )
+            updated_workflow_state = self._apply_result(workflow_state, result, attempts[agent_name])
+            return await self._persist_state(
+                {
+                    **state,
+                    "workflow_state": updated_workflow_state,
+                    "last_agent": agent_name,
+                    "attempts": attempts,
+                    "errors": list(state.get("errors", [])) + list(result.errors),
+                    "metadata": dict(state.get("metadata", {})),
+                },
+                status=WorkflowRunStatus.FAILED,
+                next_agent=None,
+                active_agent=agent_name,
+            )
 
         if attempts[agent_name] > 1:
             await self._emit("retry_started", {**state, "next_agent": agent_name, "attempts": attempts})
         await self._emit("agent_started", {**state, "next_agent": agent_name, "attempts": attempts})
         try:
+            await self._emit(
+                "provider_call_started",
+                {
+                    **state,
+                    "next_agent": agent_name,
+                    "attempts": attempts,
+                    "metadata": {
+                        **dict(state.get("metadata", {})),
+                        "provider_call_id": provider_call_id,
+                        "execution_owner": self._execution_owner,
+                    },
+                },
+            )
             result = await self._agent_runtimes[agent_name].execute(request)
         except Exception as exc:
             result = AgentExecutionResult(
@@ -252,6 +291,8 @@ class LangGraphExecutionRuntime:
                 errors=(str(exc),),
                 metadata={"route_signal": "retry"},
             )
+        finally:
+            await self._release_agent_lock(execution_id, workflow_state.workflow_id, agent_name)
 
         updated_workflow_state = self._apply_result(workflow_state, result, attempts[agent_name])
         errors = list(state.get("errors", []))
@@ -283,6 +324,28 @@ class LangGraphExecutionRuntime:
             next_agent=None,
             active_agent=agent_name,
         )
+
+    async def _acquire_agent_lock(self, execution_id: UUID, workflow_id: UUID, agent_name: str) -> bool:
+        record = await self._repository.get(execution_id)
+        owner = str(record.metadata.get("execution_owner", self._execution_owner))
+        if owner != self._execution_owner:
+            return False
+        locks = dict(record.metadata.get("agent_locks", {}))
+        lock_key = f"{workflow_id}:{agent_name}"
+        current = locks.get(lock_key)
+        if current and current != self._execution_owner:
+            return False
+        locks[lock_key] = self._execution_owner
+        await self._repository.update(record.model_copy(update={"metadata": {**record.metadata, "agent_locks": locks}}))
+        return True
+
+    async def _release_agent_lock(self, execution_id: UUID, workflow_id: UUID, agent_name: str) -> None:
+        record = await self._repository.get(execution_id)
+        locks = dict(record.metadata.get("agent_locks", {}))
+        lock_key = f"{workflow_id}:{agent_name}"
+        if locks.get(lock_key) == self._execution_owner:
+            locks.pop(lock_key, None)
+            await self._repository.update(record.model_copy(update={"metadata": {**record.metadata, "agent_locks": locks}}))
 
     def _apply_result(
         self,

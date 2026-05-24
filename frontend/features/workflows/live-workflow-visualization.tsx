@@ -17,6 +17,15 @@ export function LiveWorkflowVisualization({
   snapshot: WorkflowTelemetrySnapshot;
 }>): JSX.Element {
   const telemetry = useWorkflowTelemetry(workflowId, snapshot);
+  const completedAgents = telemetry.nodes.filter((node) => node.status === "completed").length;
+  const failedAgent = telemetry.nodes.find((node) => node.status === "failed" || node.status === "rejected");
+  const stageLabel = failedAgent
+    ? `Failed at ${failedAgent.label}`
+    : telemetry.activeAgent
+      ? `${telemetry.activeAgent} running`
+      : telemetry.progressPercent >= 100
+        ? "Completed"
+        : "Queued";
 
   return (
     <div className="space-y-6">
@@ -32,14 +41,19 @@ export function LiveWorkflowVisualization({
                 <Activity className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
                 {Math.round(telemetry.progressPercent)}%
               </Badge>
+              <Badge variant={failedAgent ? "destructive" : "muted"}>{stageLabel}</Badge>
               <Badge variant="muted">
                 <GitBranch className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
                 {formatDuration(telemetry.durationMs)}
               </Badge>
+              <Badge variant="muted">Completed: {completedAgents}/{telemetry.nodes.length || 6}</Badge>
             </div>
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(100, telemetry.progressPercent))}%` }} />
+          </div>
           <ExecutionGraph nodes={telemetry.nodes} edges={telemetry.edges} />
         </CardContent>
       </Card>

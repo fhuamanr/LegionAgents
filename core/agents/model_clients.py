@@ -72,22 +72,25 @@ class OpenAICompatibleChatModelClient(AgentModelClient):
                 yield delta
 
     def _build_payload(self, messages: tuple[PromptMessage, ...], *, stream: bool) -> dict[str, Any]:
-        budgeted_messages, estimated_prompt_tokens, compression_applied = self._fit_messages_to_budget(messages)
+        budgeted_messages, estimated_prompt_tokens, compression_applied, sections_removed = self._fit_messages_to_budget(messages)
         final_prompt_tokens = self._estimate_prompt_tokens(budgeted_messages)
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": [{"role": message.role.value, "content": message.content} for message in budgeted_messages],
             "stream": stream,
+            "max_tokens": self._reserved_output_tokens,
         }
         response_format = self._normalized_response_format()
         if response_format is not None:
             payload["response_format"] = response_format
         self._logger.info(
-            "provider request metadata: model=%s stream=%s response_format=%s estimated_prompt_tokens=%s context_limit=%s reserved_output_tokens=%s final_prompt_tokens=%s compression_applied=%s",
+            "provider request metadata: model=%s stream=%s response_format=%s prompt_tokens_before=%s prompt_tokens_after=%s sections_removed=%s context_limit=%s reserved_output_tokens=%s final_prompt_tokens=%s compression_applied=%s",
             self._model,
             stream,
             response_format["type"] if response_format else "omitted",
             estimated_prompt_tokens,
+            final_prompt_tokens,
+            sections_removed,
             self._context_window_tokens,
             self._reserved_output_tokens,
             final_prompt_tokens,
@@ -105,10 +108,10 @@ class OpenAICompatibleChatModelClient(AgentModelClient):
     def _fit_messages_to_budget(
         self,
         messages: tuple[PromptMessage, ...],
-    ) -> tuple[tuple[PromptMessage, ...], int, bool]:
+    ) -> tuple[tuple[PromptMessage, ...], int, bool, int]:
         estimated = self._estimate_prompt_tokens(messages)
         if not self._max_prompt_tokens or estimated <= self._max_prompt_tokens:
-            return messages, estimated, False
+            return messages, estimated, False, 0
         budgeted = list(messages)
         user_indexes = [index for index, item in enumerate(budgeted) if item.role.value == "user"]
         if user_indexes:
@@ -126,7 +129,7 @@ class OpenAICompatibleChatModelClient(AgentModelClient):
             raise ValueError(
                 f"Prompt exceeded model context window after compression. estimated_prompt_tokens={final_tokens}, max_prompt_tokens={self._max_prompt_tokens}."
             )
-        return final, estimated, True
+        return final, estimated, True, 1
 
     def _estimate_prompt_tokens(self, messages: tuple[PromptMessage, ...]) -> int:
         return sum(max(1, len(message.content) // 4) for message in messages)

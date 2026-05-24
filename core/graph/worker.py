@@ -40,7 +40,14 @@ async def _recover_running_records(
     for record in records:
         if record.status not in {WorkflowRunStatus.RUNNING, WorkflowRunStatus.CREATED}:
             continue
-        runtime = LangGraphExecutionRuntime(repository=repository, model_client=client)
+        owner = str(record.metadata.get("execution_owner", "backend"))
+        if owner != "langgraph-worker":
+            continue
+        runtime = LangGraphExecutionRuntime(
+            repository=repository,
+            model_client=client,
+            execution_owner="langgraph-worker",
+        )
         try:
             await runtime.recover(UUID(str(record.execution_id)))
         except Exception as exc:

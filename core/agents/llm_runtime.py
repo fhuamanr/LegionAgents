@@ -59,7 +59,12 @@ class LLMStructuredAgentRuntime(BaseAgent[BaseModel]):
         self._artifact_kind = artifact_kind
 
     async def invoke(self, context: Any) -> str:
+        local_safe_mode = bool(context.request.metadata.get("local_lm_studio_safe_mode", False))
         token_callback = context.request.metadata.get("token_callback")
+        if local_safe_mode:
+            if hasattr(self._model_client, "complete_for_runtime"):
+                return await self._model_client.complete_for_runtime(context)  # type: ignore[attr-defined]
+            return await self._model_client.complete(context.prompt_messages)
         if callable(token_callback) and hasattr(self._model_client, "stream_for_runtime"):
             chunks: list[str] = []
             async for chunk in self._model_client.stream_for_runtime(context):  # type: ignore[attr-defined]
@@ -312,7 +317,13 @@ def build_llm_agent_runtimes(
             "business analyst",
             BARequirementsOutput,
             ArtifactKind.REQUIREMENTS,
-            ("Extract and normalize BA stories and acceptance criteria only.",),
+            (
+                "ONLY convert the request into concise business analysis JSON.",
+                "Return only final JSON. Do not include reasoning.",
+                "Limit user_stories to 3-5 items.",
+                "Limit acceptance_criteria to max 4 per story.",
+                "Do not include architecture, implementation, QA, docs, or PR details.",
+            ),
         ),
         (
             "architect",
@@ -351,7 +362,7 @@ def build_llm_agent_runtimes(
                 role=role,
                 context_path=root / "agents" / name,
                 output_schema_name=output_model.__name__,
-                max_context_token_hint=2_200 if name == "ba" else 6_000,
+                max_context_token_hint=1_200 if name == "ba" else 6_000,
                 additional_instructions=instructions,
                 metadata={
                     "output_json_schema": json.dumps(output_model.model_json_schema(), indent=2),
@@ -359,7 +370,7 @@ def build_llm_agent_runtimes(
                     "enable_repository_summary": name != "ba",
                     "selected_repository_file_limit": 0 if name == "ba" else 8,
                     "repository_file_limit": 0 if name == "ba" else 80,
-                    "repository_file_token_soft_limit": 400 if name == "ba" else 800,
+                    "repository_file_token_soft_limit": 220 if name == "ba" else 800,
                     "reserved_output_token_hint": 700 if name == "ba" else 1200,
                 },
             ),

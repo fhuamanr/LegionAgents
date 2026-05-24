@@ -1005,3 +1005,18 @@ docker compose --env-file .env.compose ps
 docker compose --env-file .env.compose logs frontend --tail=200
 docker inspect ai-delivery-platform-frontend-1 --format='{{json .State.Health}}'
 ```
+### Local LM Studio Safe Mode (Recommended for 32GB RAM laptops)
+
+- Set `LOCAL_LM_STUDIO_SAFE_MODE=true` for workflow execution with local LM Studio models.
+- Behavior in safe mode:
+  - workflow agents run non-streaming by default (chat streaming remains enabled)
+  - BA prompt is compacted and hard-limited (`<=1200` prompt tokens, `<=700` output reserve)
+  - max concurrent workflow execution path is serialized in backend
+  - context-window/model-unloaded/invalid-request style failures are surfaced without retry loops
+- Recommended LM Studio settings (32GB RAM + Docker/Rancher):
+  - Qwen2.5-Coder 7B or 14B Q4_K_M
+  - `n_parallel=1`
+  - `n_ctx=8192` if stable, otherwise `4096`
+  - avoid dense 24B local models for full multi-agent runs
+  - keep BA compact mode enabled
+  - use cloud/OpenRouter for full-repository workflows if local inference is unstable

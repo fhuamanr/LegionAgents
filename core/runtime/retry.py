@@ -75,8 +75,15 @@ class ProviderErrorClassifier:
     )
     _auth_patterns = ("invalid api key", "unauthorized", "forbidden", "authentication failed")
     _model_patterns = ("model not found", "model not loaded", "no model loaded")
-    _unsupported_patterns = ("unsupported response_format", "invalid request", "malformed", "missing provider configuration")
+    _unsupported_patterns = (
+        "unsupported response_format",
+        "invalid request",
+        "malformed",
+        "missing provider configuration",
+        "prompt too large",
+    )
     _transient_patterns = ("timeout", "timed out", "connection reset", "temporary", "overloaded", "temporarily unavailable")
+    _output_validation_patterns = ("schema_contract_error", "json_parse_error", "output validation failed")
 
     def classify(self, exc: Exception) -> ProviderErrorDecision:
         text = str(exc)
@@ -94,6 +101,16 @@ class ProviderErrorClassifier:
                 suggested_action="Use compact mode, reduce context, increase model context, or choose a larger model.",
                 error_type=error_type,
             )
+        if any(pattern in lowered for pattern in self._output_validation_patterns):
+            return ProviderErrorDecision(
+                classification="non_retryable",
+                retry_allowed=False,
+                compression_allowed=False,
+                user_message="Agent output validation failed.",
+                technical_message=text,
+                suggested_action="Repair JSON/contract output locally or tighten output contract instructions.",
+                error_type=error_type,
+            )
         if any(pattern in lowered for pattern in self._auth_patterns) or status_code in {401, 403}:
             return ProviderErrorDecision(
                 classification="non_retryable",
@@ -104,7 +121,12 @@ class ProviderErrorClassifier:
                 suggested_action="Check API key and provider credentials.",
                 error_type=error_type,
             )
-        if any(pattern in lowered for pattern in self._model_patterns) or status_code == 404:
+        if (
+            any(pattern in lowered for pattern in self._model_patterns)
+            or "model unloaded" in lowered
+            or "no models loaded" in lowered
+            or status_code == 404
+        ):
             return ProviderErrorDecision(
                 classification="retryable_after_manual_action",
                 retry_allowed=False,
@@ -323,4 +345,3 @@ async def _maybe_await(value: Any) -> Any:
     if asyncio.iscoroutine(value):
         return await value
     return value
-

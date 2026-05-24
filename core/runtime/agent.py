@@ -1,6 +1,7 @@
 """Base agent runtime architecture."""
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
@@ -58,7 +59,20 @@ class BaseAgent(ABC, Generic[TOutput]):
             )
         except Exception as exc:
             self._logger.exception("agent_execution_failed", extra={"agent_name": self.config.name})
-            return self._failure(request=request, errors=(str(exc),))
+            error_text = str(exc)
+            if "json_parse_error:" in error_text:
+                error_type = "json_parse_error"
+            elif "schema_contract_error:" in error_text:
+                error_type = "schema_contract_error"
+            elif "Output is not valid JSON" in error_text:
+                error_type = "json_parse_error"
+            else:
+                error_type = "runtime_error"
+            return self._failure(
+                request=request,
+                errors=(error_text,),
+                metadata={"error_type": error_type, "raw_output_preview": error_text[:1200]},
+            )
 
         self._logger.info("agent_execution_completed", extra={"agent_name": self.config.name})
         return result
@@ -73,13 +87,17 @@ class BaseAgent(ABC, Generic[TOutput]):
             tools=tool_names,
         )
         prompt_messages = await self._prompt_builder.build(runtime_context)
+        prompt_messages, prompt_budget_observability = self._enforce_local_safe_prompt_budget(request, prompt_messages)
         runtime_context = runtime_context.model_copy(
             update={"prompt_messages": prompt_messages}
         )
 
+        started = time.perf_counter()
         raw_output = await self.invoke(runtime_context)
+        duration_seconds = max(0.0, time.perf_counter() - started)
         await self._enforce_governance_output(runtime_context, raw_output)
         structured_output = await self._output_validator.validate(raw_output)
+        validation_metadata = dict(getattr(self._output_validator, "last_validation_metadata", {}))
         await self._enforce_governance_output(runtime_context, raw_output, structured_output)
         artifacts = await self.build_artifacts(request, structured_output)
         return AgentExecutionResult(
@@ -93,6 +111,19 @@ class BaseAgent(ABC, Generic[TOutput]):
                 "context_document_count": agent_context.metadata.get("document_count", 0),
                 "context_engineering": agent_context.metadata.get("context_engineering", {}),
                 "structured_output": structured_output.model_dump(mode="json"),
+                "prompt_budget": prompt_budget_observability,
+                "validation": validation_metadata,
+                "observability": {
+                    "prompt_token_estimate": sum(max(1, len(message.content) // 4) for message in prompt_messages),
+                    "output_token_estimate": max(1, len(raw_output) // 4),
+                    "generation_duration_seconds": round(duration_seconds, 3),
+                    "model_tokens_per_second_estimate": round((max(1, len(raw_output) // 4) / duration_seconds), 2) if duration_seconds > 0 else None,
+                    "raw_output_size": len(raw_output),
+                    "json_extracted": validation_metadata.get("json_extracted", False),
+                    "sanitization_applied": validation_metadata.get("sanitization_applied", False),
+                    "fields_removed": validation_metadata.get("fields_removed", []),
+                    "validation_result": validation_metadata.get("validation_result", "unknown"),
+                },
                 **self.result_metadata(structured_output),
             },
         )
@@ -168,12 +199,14 @@ class BaseAgent(ABC, Generic[TOutput]):
         self,
         request: AgentExecutionRequest,
         errors: tuple[str, ...],
+        metadata: dict[str, object] | None = None,
     ) -> AgentExecutionResult:
         return AgentExecutionResult(
             execution_id=request.execution_id,
             agent_name=self.config.name,
             status=AgentStatus.FAILED,
             errors=errors,
+            metadata=metadata or {},
         )
 
     def _on_retry_decision(self, event) -> None:
@@ -190,3 +223,60 @@ class BaseAgent(ABC, Generic[TOutput]):
                 "suggested_action": event.suggested_action,
             },
         )
+
+    def _enforce_local_safe_prompt_budget(
+        self,
+        request: AgentExecutionRequest,
+        prompt_messages: tuple,
+    ) -> tuple[tuple, dict[str, object]]:
+        safe_mode = bool(request.metadata.get("local_lm_studio_safe_mode", False))
+        is_ba = self.config.name == "ba"
+        before = sum(max(1, len(message.content) // 4) for message in prompt_messages)
+        obs: dict[str, object] = {
+            "prompt_tokens_before": before,
+            "prompt_tokens_after": before,
+            "sections_removed": 0,
+            "final_prompt_tokens": before,
+        }
+        if not safe_mode or not is_ba:
+            return prompt_messages, obs
+        max_tokens = 1200
+        if before <= max_tokens:
+            return prompt_messages, obs
+        compact_user = (
+            "# Task\n\n"
+            f"{request.task.strip()}\n\n"
+            "# BA Rules (Compact)\n"
+            "- Act only as BA.\n"
+            "- Define MVP scope.\n"
+            "- List core entities.\n"
+            "- Capture key user flows.\n"
+            "- Provide acceptance criteria.\n"
+            "- Include out-of-scope items.\n"
+            "- Keep assumptions explicit.\n"
+            "- Keep output concise JSON.\n"
+            "- Do not include implementation/code.\n"
+            "- Do not include architecture/design docs.\n"
+        )
+        compact_system = (
+            "You are the BA agent. Return concise valid JSON only. "
+            "Do not include markdown wrappers, repository context, architecture rules, or downstream agent rules."
+        )
+        compact = (
+            prompt_messages[0].model_copy(update={"content": compact_system}),
+            prompt_messages[1].model_copy(update={"content": compact_user}),
+        )
+        after = sum(max(1, len(message.content) // 4) for message in compact)
+        obs.update(
+            {
+                "prompt_tokens_after": after,
+                "sections_removed": 1,
+                "final_prompt_tokens": after,
+            }
+        )
+        if after > max_tokens:
+            raise ValueError(
+                "BA prompt too large for local safe mode after reduction. "
+                f"prompt_tokens_before={before} prompt_tokens_after={after} max_prompt_tokens={max_tokens}"
+            )
+        return compact, obs
