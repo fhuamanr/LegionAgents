@@ -27,6 +27,7 @@ from core.agents.runtime import AgentModelClient
 from core.contracts.prompts import PromptMessage, PromptRole
 from core.ingestion import StoryIngestionPipeline
 from core.streaming import (
+    ExecutionEventBus,
     ExecutionEvent,
     ExecutionEventEmitter,
     ExecutionEventType,
@@ -50,7 +51,7 @@ class ExecutionService:
 
     def __init__(
         self,
-        event_bus: InMemoryExecutionEventBus | None = None,
+        event_bus: ExecutionEventBus | None = None,
         model_client: AgentModelClient | None = None,
         workflow_repository: WorkflowExecutionRepository | None = None,
         state_store: PostgresJsonDocumentStore | None = None,
@@ -146,7 +147,11 @@ class ExecutionService:
     async def _initialize_workflow(self, request: TriggerWorkflowRequest) -> WorkflowResponse:
         now = datetime.now(timezone.utc)
         workflow_id = uuid4()
-        metadata: dict[str, Any] = dict(request.metadata)
+        metadata: dict[str, Any] = {
+            key: value
+            for key, value in dict(request.metadata).items()
+            if not callable(value) and not str(key).startswith("_")
+        }
         if request.upload_id:
             metadata["upload_id"] = str(request.upload_id)
         workflow = WorkflowResponse(
@@ -161,6 +166,20 @@ class ExecutionService:
         self._workflows[workflow_id] = workflow
         await self._persist_workflow(workflow)
         await self.tracker.start_workflow(workflow_id=workflow_id, total_steps=6)
+        created_event = ExecutionEvent(
+            type=ExecutionEventType.PROGRESS_UPDATED,
+            workflow_id=workflow_id,
+            thread_id=request.thread_id,
+            message="Workflow created and queued for execution.",
+            payload={"status": workflow.status.value, "task": workflow.task},
+        )
+        await self.event_bus.publish(created_event)
+        await self.logger.log(
+            ExecutionLogLevel.INFO,
+            "Workflow created and started.",
+            workflow_id=workflow_id,
+            payload={"status": workflow.status.value},
+        )
         return workflow
 
     async def _execute_workflow(self, workflow_id: UUID, request: TriggerWorkflowRequest) -> WorkflowResponse:
@@ -198,6 +217,19 @@ class ExecutionService:
         )
         self._workflows[workflow_id] = final_workflow
         await self._persist_workflow(final_workflow)
+        await self.event_bus.publish(
+            ExecutionEvent(
+                type=ExecutionEventType.PROGRESS_UPDATED,
+                workflow_id=workflow_id,
+                thread_id=request.thread_id,
+                message=f"Workflow finished with status {final_workflow.status.value}.",
+                payload={
+                    "status": final_workflow.status.value,
+                    "execution_id": str(result.execution_id),
+                    "checkpoint_count": len(result.checkpoints),
+                },
+            )
+        )
         return final_workflow
 
     async def recover_workflow(
@@ -354,6 +386,22 @@ class ExecutionService:
                 PromptMessage(role=PromptRole.USER, content=content),
             )
         )
+
+    async def stream_chat(self, content: str):
+        if self._model_client is None:
+            raise ValueError("No provider is configured.")
+        messages = (
+            PromptMessage(role=PromptRole.SYSTEM, content="You are the AI Workspace assistant for Legion Agents."),
+            PromptMessage(role=PromptRole.USER, content=content),
+        )
+        if hasattr(self._model_client, "stream_complete"):
+            async for chunk in self._model_client.stream_complete(messages):  # type: ignore[attr-defined]
+                if chunk:
+                    yield chunk
+            return
+        result = await self._model_client.complete(messages)
+        if result:
+            yield result
 
     def _runtime_event_hook(
         self,

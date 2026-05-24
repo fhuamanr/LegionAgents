@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.dependencies.container import get_execution_service
 from app.services.execution_service import ExecutionService
+from core.streaming import ExecutionEvent
 from core.streaming import ExecutionEventType
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -21,7 +22,8 @@ async def get_dashboard_snapshot(
 
     workflow_id = workflow.workflow_id
     telemetry = await service.get_workflow_telemetry(workflow_id)
-    events = await service.event_bus.history(workflow_id=workflow_id)
+    log_response = await service.get_logs(workflow_id)
+    events = tuple(ExecutionEvent.model_validate(event) for event in log_response.events)
     event_dicts = [_frontend_event(event) for event in events]
     logs = [
         {

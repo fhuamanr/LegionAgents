@@ -4,6 +4,8 @@ import time
 from app.services.execution_service import ExecutionService
 from app.main import create_app
 from tests.test_real_workflow_runtime import WorkflowModelClient
+from core.agents.runtime import AgentModelClient
+from core.contracts.prompts import PromptMessage
 
 
 def _client() -> TestClient:
@@ -12,6 +14,21 @@ def _client() -> TestClient:
 
 def _client_without_provider() -> TestClient:
     return TestClient(create_app(execution_service=ExecutionService()))
+
+
+class ChatStreamingModelClient(AgentModelClient):
+    async def complete(self, messages: tuple[PromptMessage, ...]) -> str:
+        user = next((message.content for message in messages if message.role.value == "user"), "")
+        return f"Echo: {user}"
+
+    async def stream_complete(self, messages: tuple[PromptMessage, ...]):
+        yield "Echo: "
+        user = next((message.content for message in messages if message.role.value == "user"), "")
+        yield user
+
+
+def _client_with_chat_streaming() -> TestClient:
+    return TestClient(create_app(execution_service=ExecutionService(model_client=ChatStreamingModelClient())))
 
 
 def test_healthcheck() -> None:
@@ -265,7 +282,16 @@ def test_workspace_chat_api_uploads_references_and_triggers_workflow() -> None:
         },
     )
     assert message_response.status_code == 201
-    assert message_response.json()["workflow"]["status"] == "completed"
+    workflow_id = message_response.json()["workflow"]["workflow_id"]
+    deadline = time.time() + 10
+    final_status = ""
+    while time.time() < deadline:
+        status_payload = client.get(f"/executions/{workflow_id}/status").json()
+        final_status = status_payload["status"]
+        if final_status in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.1)
+    assert final_status in {"running", "completed"}
 
     events_response = client.get(f"/workspace/chat/conversations/{conversation_id}/events")
     assert events_response.status_code == 200
@@ -315,6 +341,22 @@ def test_workspace_chat_delete_conversation() -> None:
     assert all(item["id"] != conversation_id for item in listed)
 
 
+def test_workspace_chat_workflow_run_does_not_duplicate_user_message() -> None:
+    client = _client()
+    conversation_id = client.post(
+        "/workspace/chat/conversations",
+        json={"title": "Workflow no duplicate", "created_by": "tester"},
+    ).json()["conversation"]["id"]
+    send = client.post(
+        f"/workspace/chat/conversations/{conversation_id}/messages",
+        json={"content": "Run workflow once", "trigger_workflow": True},
+    )
+    assert send.status_code == 201
+    conversation = client.get(f"/workspace/chat/conversations/{conversation_id}").json()["conversation"]
+    user_messages = [message for message in conversation["messages"] if message["role"] == "user"]
+    assert len(user_messages) == 1
+
+
 def test_workspace_chat_send_returns_immediately_with_pending_assistant() -> None:
     client = _client()
     conversation_id = client.post(
@@ -330,6 +372,63 @@ def test_workspace_chat_send_returns_immediately_with_pending_assistant() -> Non
     assert payload["job_id"] is not None
     assert payload["assistant_message"] is not None
     assert payload["assistant_message"]["status"] in {"pending", "streaming", "completed"}
+
+
+def test_workspace_chat_streaming_completes_and_persists() -> None:
+    client = _client_with_chat_streaming()
+    conversation_id = client.post(
+        "/workspace/chat/conversations",
+        json={"title": "Streaming chat", "created_by": "tester"},
+    ).json()["conversation"]["id"]
+    response = client.post(
+        f"/workspace/chat/conversations/{conversation_id}/messages",
+        json={"content": "hola, quien eres", "trigger_workflow": False},
+    )
+    assert response.status_code == 201
+    deadline = time.time() + 5
+    completed = None
+    while time.time() < deadline:
+        conversation = client.get(f"/workspace/chat/conversations/{conversation_id}").json()["conversation"]
+        assistant = [message for message in conversation["messages"] if message["role"] == "assistant"][-1]
+        if assistant.get("status") == "completed":
+            completed = assistant
+            break
+        time.sleep(0.1)
+    assert completed is not None
+    assert completed["content"] == "Echo: hola, quien eres"
+    events = client.get(f"/workspace/chat/conversations/{conversation_id}/events").json()["events"]
+    completion_events = [
+        event for event in events
+        if event["type"] == "execution_progress"
+        and isinstance(event.get("payload"), dict)
+        and event["payload"].get("id") == completed["id"]
+        and event["payload"].get("status") == "completed"
+    ]
+    assert completion_events
+    assert completion_events[-1]["payload"]["content"] == "Echo: hola, quien eres"
+
+
+def test_workspace_chat_sse_stream_emits_started_delta_and_completed() -> None:
+    client = _client_with_chat_streaming()
+    conversation_id = client.post(
+        "/workspace/chat/conversations",
+        json={"title": "SSE chat", "created_by": "tester"},
+    ).json()["conversation"]["id"]
+    with client.stream(
+        "POST",
+        f"/workspace/chat/conversations/{conversation_id}/messages/stream",
+        json={"content": "hola, quien eres", "trigger_workflow": False},
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        body = "".join(response.iter_text())
+    assert "event: message_started" in body
+    assert "event: content_delta" in body
+    assert "event: message_completed" in body
+    conversation = client.get(f"/workspace/chat/conversations/{conversation_id}").json()["conversation"]
+    assistant = [message for message in conversation["messages"] if message["role"] == "assistant"][-1]
+    assert assistant["status"] == "completed"
+    assert assistant["content"] == "Echo: hola, quien eres"
 
 
 def test_governance_seed_loads_repository_markdown_documents() -> None:

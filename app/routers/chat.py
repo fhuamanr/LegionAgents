@@ -3,6 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 
 from app.dependencies.container import get_chat_service
 from app.schemas import (
@@ -68,6 +69,23 @@ async def create_message(
     service: WorkspaceChatApplicationService = Depends(get_chat_service),
 ) -> ChatMessageResponse:
     return await service.create_message(conversation_id, request)
+
+
+@router.post("/conversations/{conversation_id}/messages/stream")
+async def stream_message(
+    conversation_id: UUID,
+    request: ChatMessageCreateRequest,
+    service: WorkspaceChatApplicationService = Depends(get_chat_service),
+) -> StreamingResponse:
+    return StreamingResponse(
+        service.stream_message(conversation_id, request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/conversations/{conversation_id}/events", response_model=ChatEventListResponse)

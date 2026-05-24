@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from uuid import UUID
 
+from core.persistence import PostgresJsonDocumentStore
 from core.streaming.models import ExecutionEvent, ExecutionEventType
 
 
@@ -68,4 +69,47 @@ class InMemoryExecutionEventBus(ExecutionEventBus):
                     yield event
         finally:
             self._subscribers.remove(queue)
+
+
+class PostgresBackedExecutionEventBus(ExecutionEventBus):
+    """Execution event bus with PostgreSQL persistence and in-memory live fanout."""
+
+    _bucket = "execution_events"
+
+    def __init__(self, store: PostgresJsonDocumentStore) -> None:
+        self._store = store
+        self._memory = InMemoryExecutionEventBus()
+
+    async def publish(self, event: ExecutionEvent) -> None:
+        await self._memory.publish(event)
+        key = f"{str(event.workflow_id or 'none')}:{event.timestamp.isoformat()}:{str(event.id)}"
+        await self._store.upsert(
+            bucket=self._bucket,
+            document_id=event.id,
+            key=key,
+            payload=event.model_dump(mode="json"),
+        )
+
+    async def history(
+        self,
+        workflow_id: UUID | None = None,
+        event_type: ExecutionEventType | None = None,
+    ) -> tuple[ExecutionEvent, ...]:
+        persisted = tuple(
+            ExecutionEvent.model_validate(payload)
+            for payload in await self._store.list(bucket=self._bucket)
+        )
+        return tuple(
+            event
+            for event in persisted
+            if (workflow_id is None or event.workflow_id == workflow_id)
+            and (event_type is None or event.type == event_type)
+        )
+
+    async def subscribe(
+        self,
+        workflow_id: UUID | None = None,
+    ) -> AsyncIterator[ExecutionEvent]:
+        async for event in self._memory.subscribe(workflow_id=workflow_id):
+            yield event
 

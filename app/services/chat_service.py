@@ -4,7 +4,9 @@ from pathlib import Path
 from uuid import UUID
 import logging
 import asyncio
+import json
 from uuid import uuid4
+from collections.abc import AsyncIterator
 
 from app.schemas import (
     ChatAttachmentResponse,
@@ -134,7 +136,7 @@ class WorkspaceChatApplicationService:
                     },
                 )
         elif should_trigger:
-            workflow_response = await self._execution_service.trigger_workflow(
+            workflow_response = await self._execution_service.trigger_workflow_live(
                 TriggerWorkflowRequest(
                     task=intent.normalized_task,
                     thread_id=str(conversation_id),
@@ -151,6 +153,11 @@ class WorkspaceChatApplicationService:
             )
             workflow = workflow_response.model_dump(mode="json")
             workflow_id = workflow_response.workflow_id
+            self._logger.info(
+                "workspace workflow started: conversation_id=%s workflow_id=%s",
+                conversation_id,
+                workflow_id,
+            )
             await self._chat.emit_workflow_triggered(conversation_id, workflow_response.workflow_id)
             await self._chat.emit_progress(
                 conversation_id,
@@ -193,6 +200,97 @@ class WorkspaceChatApplicationService:
             job_id=job_id,
             status="running" if job_id else "completed",
         )
+
+    async def stream_message(
+        self,
+        conversation_id: UUID,
+        request: ChatMessageCreateRequest,
+    ) -> AsyncIterator[str]:
+        conversation = await self._chat.get_conversation(conversation_id)
+        attachments = self._select_attachments(conversation.attachments, request.attachment_ids)
+        intent = await self._intent_parser.parse(request.content, attachments)
+        should_resume = request.resume_workflow or intent.resume_requested
+        should_trigger = request.trigger_workflow or intent.should_trigger_workflow
+
+        user_message = await self._chat.add_message(
+            conversation_id,
+            ChatMessageRequest(
+                content=request.content,
+                attachment_ids=request.attachment_ids,
+                trigger_workflow=should_trigger,
+                resume_workflow=should_resume,
+                metadata={
+                    **request.metadata,
+                    "intent": intent.model_dump(mode="json"),
+                    "transport": "sse",
+                },
+            ),
+        )
+        assistant_message = await self._chat.add_assistant_message(
+            conversation_id,
+            "Generating response...",
+            status=ChatMessageStatus.PENDING,
+            metadata={
+                "source_user_message_id": str(user_message.id),
+                "provider_async": False,
+                "transport": "sse",
+            },
+        )
+        yield self._sse_event(
+            "message_started",
+            {
+                "conversation_id": str(conversation_id),
+                "user_message": user_message.model_dump(mode="json"),
+                "assistant_message": assistant_message.model_dump(mode="json"),
+            },
+        )
+        if should_trigger or should_resume:
+            response = await self.create_message(conversation_id, request)
+            if response.assistant_message:
+                yield self._sse_event("message_snapshot", response.assistant_message)
+                yield self._sse_event("message_completed", response.assistant_message)
+            else:
+                yield self._sse_event("message_failed", {"error": "Workflow response did not return assistant message."})
+            return
+
+        streaming = assistant_message.model_copy(update={"status": ChatMessageStatus.STREAMING})
+        streaming = await self._chat.update_message(conversation_id, streaming)
+        yield self._sse_event("message_snapshot", streaming.model_dump(mode="json"))
+        parts: list[str] = []
+        try:
+            async for chunk in self._execution_service.stream_chat(request.content):
+                parts.append(chunk)
+                partial = streaming.model_copy(
+                    update={"content": "".join(parts), "status": ChatMessageStatus.STREAMING, "error": None}
+                )
+                streaming = await self._chat.update_message(conversation_id, partial)
+                yield self._sse_event(
+                    "content_delta",
+                    {
+                        "conversation_id": str(conversation_id),
+                        "message_id": str(streaming.id),
+                        "delta": chunk,
+                    },
+                )
+                yield self._sse_event("message_snapshot", streaming.model_dump(mode="json"))
+            final_content = "".join(parts).strip()
+            if not final_content:
+                raise ValueError("Provider returned an empty response.")
+            completed = streaming.model_copy(
+                update={"content": final_content, "status": ChatMessageStatus.COMPLETED, "error": None}
+            )
+            completed = await self._chat.update_message(conversation_id, completed)
+            yield self._sse_event("message_snapshot", completed.model_dump(mode="json"))
+            yield self._sse_event("message_completed", completed.model_dump(mode="json"))
+        except Exception as exc:  # noqa: BLE001
+            self._logger.exception("sse chat generation failed: conversation_id=%s", conversation_id)
+            failed = streaming.model_copy(
+                update={"content": "".join(parts), "status": ChatMessageStatus.FAILED, "error": f"Provider error: {exc}"}
+            )
+            failed = await self._chat.update_message(conversation_id, failed)
+            yield self._sse_event("message_snapshot", failed.model_dump(mode="json"))
+            yield self._sse_event("message_failed", failed.model_dump(mode="json"))
+        yield self._sse_event("heartbeat", {"conversation_id": str(conversation_id), "status": "closed"})
 
     async def events(self, conversation_id: UUID) -> ChatEventListResponse:
         events = await self._chat.event_bus.history(conversation_id)
@@ -297,7 +395,16 @@ class WorkspaceChatApplicationService:
         streaming = assistant_message.model_copy(update={"status": ChatMessageStatus.STREAMING})
         await self._chat.update_message(conversation_id, streaming)
         try:
-            response = await self._execution_service.complete_chat(prompt)
+            parts: list[str] = []
+            async for chunk in self._execution_service.stream_chat(prompt):
+                parts.append(chunk)
+                partial = streaming.model_copy(
+                    update={"content": "".join(parts), "status": ChatMessageStatus.STREAMING, "error": None}
+                )
+                streaming = await self._chat.update_message(conversation_id, partial)
+            response = "".join(parts).strip()
+            if not response:
+                raise ValueError("Provider returned an empty response.")
             completed = streaming.model_copy(
                 update={"content": response, "status": ChatMessageStatus.COMPLETED, "error": None}
             )
@@ -317,3 +424,6 @@ class WorkspaceChatApplicationService:
         finally:
             self._jobs.pop(job_id, None)
             self._job_message_map.pop(job_id, None)
+
+    def _sse_event(self, event: str, data: dict) -> str:
+        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=True)}\n\n"

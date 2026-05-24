@@ -46,6 +46,10 @@ class ProviderConfig(BaseModel):
     status: ProviderStatus = ProviderStatus.ACTIVE
     agent_models: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float | None = 60
+    context_window_tokens: int | None = 8192
+    max_output_tokens: int | None = 1024
+    reserved_output_tokens: int | None = 1024
+    max_prompt_tokens: int | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     is_default: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -179,6 +183,9 @@ class ProviderRegistry:
             supports_json_schema=bool(provider.capabilities.get("supports_json_schema", False)),
             supports_text_response_format=bool(provider.capabilities.get("supports_text_response_format", True)),
             headers=provider.headers,
+            context_window_tokens=provider.context_window_tokens,
+            reserved_output_tokens=provider.reserved_output_tokens or provider.max_output_tokens or 1024,
+            max_prompt_tokens=provider.max_prompt_tokens,
         )
 
     async def health(self, provider_id: UUID | None = None) -> tuple[ProviderHealth, ...]:

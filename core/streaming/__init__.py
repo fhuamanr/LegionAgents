@@ -1,6 +1,6 @@
 """Real-time execution streaming infrastructure."""
 
-from core.streaming.bus import ExecutionEventBus, InMemoryExecutionEventBus
+from core.streaming.bus import ExecutionEventBus, InMemoryExecutionEventBus, PostgresBackedExecutionEventBus
 from core.streaming.emitter import ExecutionEventEmitter
 from core.streaming.logging import StructuredExecutionLogger
 from core.streaming.models import (
@@ -26,6 +26,7 @@ __all__ = [
     "ExecutionTimeline",
     "ExecutionTracker",
     "InMemoryExecutionEventBus",
+    "PostgresBackedExecutionEventBus",
     "StructuredExecutionLogger",
     "TelemetrySink",
     "TimelineEntry",

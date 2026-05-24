@@ -80,13 +80,19 @@ class MarkdownRuleContextAssembler(ContextAssembler):
         )
 
     def _config_from_runtime(self, config: RuntimeAgentConfig) -> ContextEngineeringConfig:
+        compact_mode = bool(config.metadata.get("compact_mode", False))
         return ContextEngineeringConfig(
-            max_token_hint=config.max_context_token_hint or 12_000,
-            reserved_output_token_hint=int(config.metadata.get("reserved_output_token_hint", 1_500)),
-            selected_repository_file_limit=int(config.metadata.get("selected_repository_file_limit", 12)),
-            repository_file_limit=int(config.metadata.get("repository_file_limit", 200)),
-            repository_file_token_soft_limit=int(config.metadata.get("repository_file_token_soft_limit", 900)),
-            repository_file_max_bytes=int(config.metadata.get("repository_file_max_bytes", 20_000)),
+            max_token_hint=config.max_context_token_hint or (3_000 if compact_mode else 12_000),
+            reserved_output_token_hint=int(config.metadata.get("reserved_output_token_hint", 800 if compact_mode else 1_500)),
+            enable_repository_summary=bool(config.metadata.get("enable_repository_summary", True)),
+            enable_architecture_summary=bool(config.metadata.get("enable_architecture_summary", True)),
+            enable_memory=bool(config.metadata.get("enable_memory", True)),
+            enable_compression=bool(config.metadata.get("enable_compression", True)),
+            selected_repository_file_limit=int(config.metadata.get("selected_repository_file_limit", 4 if compact_mode else 12)),
+            repository_file_limit=int(config.metadata.get("repository_file_limit", 24 if compact_mode else 200)),
+            repository_file_token_soft_limit=int(config.metadata.get("repository_file_token_soft_limit", 450 if compact_mode else 900)),
+            repository_file_max_bytes=int(config.metadata.get("repository_file_max_bytes", 8_000 if compact_mode else 20_000)),
+            item_token_soft_limit=int(config.metadata.get("item_token_soft_limit", 350 if compact_mode else 700)),
         )
 
     def _repository_path(

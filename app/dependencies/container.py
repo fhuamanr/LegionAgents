@@ -18,6 +18,7 @@ from core.governance_management import GovernanceManagementService, PostgresGove
 from core.persistence import PostgresJsonDocumentStore
 from core.prompt_studio import PostgresPromptRepository, PromptStudioService
 from core.chat import PostgresChatConversationRepository, WorkspaceChatService
+from core.streaming import PostgresBackedExecutionEventBus
 from core.workspaces import PostgresWorkspaceRepository, WorkspaceManagementService
 
 
@@ -53,7 +54,9 @@ class AppContainer:
         )
         self.provider_registry = ProviderRegistry(postgres_store)
         self.provider_service = ProviderApplicationService(self.provider_registry)
+        execution_event_bus = PostgresBackedExecutionEventBus(postgres_store) if postgres_store is not None else None
         self.execution_service = ExecutionService(
+            event_bus=execution_event_bus,
             model_client=RoutingModelClient(self.provider_registry),
             workflow_repository=workflow_repository,
             state_store=postgres_store,

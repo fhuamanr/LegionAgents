@@ -6,6 +6,19 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 TResult = TypeVar("TResult")
+CONTEXT_OVERFLOW_PATTERNS = (
+    "context size",
+    "context length",
+    "max context",
+    "n_ctx",
+    "n_keep",
+    "exceeds the available context size",
+    "prompt too large",
+)
+
+
+class ContextWindowExceededError(ValueError):
+    """Raised when an LLM prompt exceeds provider context limits."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,9 +44,16 @@ class RetryEngine:
             attempt += 1
             try:
                 return await operation()
-            except self._policy.retryable_exceptions:
+            except self._policy.retryable_exceptions as exc:
+                if isinstance(exc, ContextWindowExceededError) or _looks_like_context_overflow(exc):
+                    raise
                 if attempt >= self._policy.max_attempts:
                     raise
                 await asyncio.sleep(delay)
                 delay *= self._policy.backoff_multiplier
+
+
+def _looks_like_context_overflow(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(pattern in text for pattern in CONTEXT_OVERFLOW_PATTERNS)
 

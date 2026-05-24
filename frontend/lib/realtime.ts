@@ -11,7 +11,7 @@ export function connectExecutionStream(
 ): ExecutionStream | null {
   const wsBaseUrl = process.env.NEXT_PUBLIC_WS_BASE_URL;
 
-  if (!wsBaseUrl || typeof window === "undefined") {
+  if (!wsBaseUrl || typeof window === "undefined" || !workflowId || workflowId === "no-active-workflow") {
     return null;
   }
 
@@ -41,7 +41,7 @@ export function connectWorkflowTelemetryStream(
 ): WorkflowTelemetryStream | null {
   const wsBaseUrl = process.env.NEXT_PUBLIC_WS_BASE_URL;
 
-  if (!wsBaseUrl || typeof window === "undefined") {
+  if (!wsBaseUrl || typeof window === "undefined" || !workflowId || workflowId === "no-active-workflow") {
     return null;
   }
 
@@ -58,6 +58,47 @@ export function connectWorkflowTelemetryStream(
     socket.addEventListener("error", onError);
   }
 
+  return {
+    close: () => socket.close(),
+  };
+}
+
+export interface ChatStreamEvent {
+  readonly id: string;
+  readonly conversation_id: string;
+  readonly type: string;
+  readonly message: string;
+  readonly payload: Record<string, unknown>;
+  readonly created_at: string;
+}
+
+export function connectChatStream(
+  conversationId: string,
+  onEvent: (event: ChatStreamEvent) => void,
+  onError?: (error: Event) => void,
+): ExecutionStream | null {
+  const wsBaseUrl = process.env.NEXT_PUBLIC_WS_BASE_URL;
+  if (!wsBaseUrl || typeof window === "undefined" || !conversationId) {
+    return null;
+  }
+
+  const socket = new WebSocket(`${wsBaseUrl}/ws/chat/${conversationId}`);
+  socket.addEventListener("message", (message) => {
+    const payload = JSON.parse(message.data as string) as Record<string, unknown>;
+    onEvent({
+      id: String(payload.id ?? ""),
+      conversation_id: String(payload.conversation_id ?? ""),
+      type: String(payload.type ?? ""),
+      message: String(payload.message ?? ""),
+      payload: payload.payload && typeof payload.payload === "object" && !Array.isArray(payload.payload)
+        ? (payload.payload as Record<string, unknown>)
+        : {},
+      created_at: String(payload.created_at ?? new Date().toISOString()),
+    });
+  });
+  if (onError) {
+    socket.addEventListener("error", onError);
+  }
   return {
     close: () => socket.close(),
   };

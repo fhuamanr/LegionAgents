@@ -39,6 +39,10 @@ class ProviderUpsertApiRequest(ApiModel):
     status: str = Field(default="active", min_length=1)
     agent_models: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float | None = 240
+    context_window_tokens: int | None = 8192
+    max_output_tokens: int | None = 1024
+    reserved_output_tokens: int | None = 1024
+    max_prompt_tokens: int | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     is_default: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -63,6 +67,10 @@ class ProviderConnectivityApiRequest(ApiModel):
     api_key: str | None = None
     default_model: str = Field(min_length=1)
     timeout_seconds: float | None = 60
+    context_window_tokens: int | None = 8192
+    max_output_tokens: int | None = 1024
+    reserved_output_tokens: int | None = 1024
+    max_prompt_tokens: int | None = None
     headers: dict[str, str] = Field(default_factory=dict)
 
 

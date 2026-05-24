@@ -34,6 +34,9 @@ export function ProviderManagement({
   const [defaultModel, setDefaultModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [isDefault, setIsDefault] = useState(false);
+  const [contextWindowTokens, setContextWindowTokens] = useState("4096");
+  const [reservedOutputTokens, setReservedOutputTokens] = useState("1024");
+  const [maxPromptTokens, setMaxPromptTokens] = useState("3000");
   const active = providerItems.filter((provider) => provider.status === "active");
 
   return (
@@ -56,6 +59,9 @@ export function ProviderManagement({
             <Field label="Base URL" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={setBaseUrl} />
             <Field label="Default model" placeholder="gpt-5-mini" value={defaultModel} onChange={setDefaultModel} required />
             <Field label="API key" placeholder="sk-..." value={apiKey} onChange={setApiKey} type="password" />
+            <Field label="Context window" placeholder="4096" value={contextWindowTokens} onChange={setContextWindowTokens} />
+            <Field label="Reserved output" placeholder="1024" value={reservedOutputTokens} onChange={setReservedOutputTokens} />
+            <Field label="Max prompt tokens" placeholder="3000" value={maxPromptTokens} onChange={setMaxPromptTokens} />
             <label className="flex items-center gap-2 rounded-md border px-3 text-xs font-medium">
               <input type="checkbox" checked={isDefault} onChange={(event) => setIsDefault(event.target.checked)} />
               Set as default
@@ -72,6 +78,9 @@ export function ProviderManagement({
             </div>
           </form>
           {message ? <p className="mt-3 text-xs text-muted-foreground">{message}</p> : null}
+          <p className="mt-2 text-xs text-muted-foreground">
+            LM Studio in Docker: use <code>http://host.docker.internal:1234/v1</code> (not <code>http://127.0.0.1:1234/v1</code>). Small local models may require compact workflow mode.
+          </p>
         </CardContent>
       </Card>
 
@@ -107,6 +116,8 @@ export function ProviderManagement({
                     <Detail label="Endpoint" value={provider.baseUrl || "OpenAI default"} />
                     <Detail label="API key" value={provider.apiKey || "Not configured"} />
                     <Detail label="Updated" value={provider.updatedAt ? new Date(provider.updatedAt).toLocaleString() : "Unknown"} />
+                    <Detail label="Context" value={provider.contextWindowTokens ? `${provider.contextWindowTokens} tokens` : "default"} />
+                    <Detail label="Prompt budget" value={provider.maxPromptTokens ? `${provider.maxPromptTokens}` : "auto"} />
                   </dl>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {Object.entries(provider.agentModels).length === 0 ? (
@@ -193,6 +204,9 @@ export function ProviderManagement({
             default_model: defaultModel,
             status: "active",
             is_default: isDefault,
+            context_window_tokens: parseInt(contextWindowTokens || "0", 10) || null,
+            reserved_output_tokens: parseInt(reservedOutputTokens || "0", 10) || null,
+            max_prompt_tokens: parseInt(maxPromptTokens || "0", 10) || null,
           }),
       });
       if (!response.ok) throw new Error(await extractError(response));
@@ -222,6 +236,9 @@ export function ProviderManagement({
           base_url: baseUrl.trim() || null,
           api_key: apiKey.trim() || null,
           default_model: defaultModel,
+          context_window_tokens: parseInt(contextWindowTokens || "0", 10) || null,
+          reserved_output_tokens: parseInt(reservedOutputTokens || "0", 10) || null,
+          max_prompt_tokens: parseInt(maxPromptTokens || "0", 10) || null,
         }),
       });
       if (!response.ok) throw new Error(await extractError(response));
@@ -271,6 +288,10 @@ function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {
     defaultModel: String(item.default_model ?? ""),
     status: String(item.status) as LlmProviderSummary["status"],
     agentModels: (item.agent_models ?? {}) as Record<string, string>,
+    contextWindowTokens: item.context_window_tokens ? Number(item.context_window_tokens) : undefined,
+    maxOutputTokens: item.max_output_tokens ? Number(item.max_output_tokens) : undefined,
+    reservedOutputTokens: item.reserved_output_tokens ? Number(item.reserved_output_tokens) : undefined,
+    maxPromptTokens: item.max_prompt_tokens ? Number(item.max_prompt_tokens) : undefined,
     configured: Boolean(item.configured),
     isDefault: Boolean(item.is_default ?? false),
     updatedAt: String(item.updated_at ?? ""),

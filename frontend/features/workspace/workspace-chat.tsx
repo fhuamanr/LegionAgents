@@ -7,6 +7,7 @@ import { FileUp, GitBranch, Link2, Loader2, Play, Send, Trash2, UploadCloud } fr
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { connectChatStream } from "@/lib/realtime";
 import { formatDateTime } from "@/lib/utils";
 import type { WorkspaceConversationSummary } from "@/lib/types";
 
@@ -19,11 +20,20 @@ export function WorkspaceChat({
   const [items, setItems] = useState<readonly WorkspaceConversationSummary[]>(conversations);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [workflowStatus, setWorkflowStatus] = useState<string | null>(null);
+  const [workflowLogs, setWorkflowLogs] = useState<readonly { id: string; message: string; type: string }[]>([]);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(conversations.length ? null : "Upload files or create a conversation to start.");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const conversation = useMemo(() => items.find((item) => item.id === selectedId) ?? items[0], [items, selectedId]);
   const attachmentIds = conversation?.attachments.map((attachment) => attachment.id) ?? [];
+  const activeWorkflowId = useMemo(() => {
+    const messages = conversation?.messages ?? [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].workflowId) return messages[index].workflowId;
+    }
+    return undefined;
+  }, [conversation?.messages]);
 
   return (
     <div className="grid min-h-[78vh] gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_20rem]">
@@ -119,6 +129,19 @@ export function WorkspaceChat({
             </Button>
           </div>
           {notice ? <p className="text-xs text-muted-foreground">{notice}</p> : null}
+          {activeWorkflowId ? (
+            <div className="rounded-md border bg-background p-3">
+              <div className="text-xs text-muted-foreground">Workflow {activeWorkflowId}</div>
+              <div className="mt-1 text-sm">status: {workflowStatus ?? "loading"}</div>
+              <div className="mt-2 max-h-40 overflow-auto space-y-1">
+                {workflowLogs.slice(-8).map((entry) => (
+                  <div key={entry.id} className="text-xs">
+                    <span className="text-muted-foreground">{entry.type}</span> {entry.message}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -199,19 +222,148 @@ export function WorkspaceChat({
     }
     setBusy(true);
     try {
-      const response = await fetch(`${apiBaseUrl}/workspace/chat/conversations/${active.id}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ content: draft, attachment_ids: attachmentIds, trigger_workflow: triggerWorkflow }),
-      });
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const requestContent = draft;
       setDraft("");
+      if (triggerWorkflow) {
+        const response = await fetch(`${apiBaseUrl}/workspace/chat/conversations/${active.id}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ content: requestContent, attachment_ids: attachmentIds, trigger_workflow: true }),
+        });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        await refreshConversation(active.id);
+        setNotice("Workflow started. Check executions/logs.");
+        return;
+      }
+      const tempUserId = `temp-user-${Date.now()}`;
+      const tempAssistantId = `temp-assistant-${Date.now()}`;
+      const now = new Date().toISOString();
+      setItems((current) =>
+        current.map((item) => {
+          if (item.id !== active.id) return item;
+          return {
+            ...item,
+            updatedAt: now,
+            messages: [
+              ...item.messages,
+              { id: tempUserId, role: "user", content: requestContent, status: "completed", attachmentIds, createdAt: now },
+              { id: tempAssistantId, role: "assistant", content: "Generating response...", status: "pending", attachmentIds: [], createdAt: now },
+            ],
+          };
+        }),
+      );
+      await streamMessageViaSse({
+        conversationId: active.id,
+        content: requestContent,
+        attachmentIds,
+        tempUserId,
+        tempAssistantId,
+      });
       await refreshConversation(active.id);
-      setNotice(triggerWorkflow ? "Workflow started. Check executions/logs." : "Message sent.");
+      setNotice("Message completed.");
     } catch (error) {
       setNotice(`Send failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      await refreshConversation(active.id);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function streamMessageViaSse(params: {
+    conversationId: string;
+    content: string;
+    attachmentIds: readonly string[];
+    tempUserId: string;
+    tempAssistantId: string;
+  }): Promise<void> {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) throw new Error("NEXT_PUBLIC_API_BASE_URL is not configured.");
+    const response = await fetch(`${apiBaseUrl}/workspace/chat/conversations/${params.conversationId}/messages/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify({ content: params.content, attachment_ids: params.attachmentIds, trigger_workflow: false }),
+      cache: "no-store",
+    });
+    if (!response.ok || !response.body) throw new Error(`${response.status} ${response.statusText}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let done = false;
+    let actualAssistantId = params.tempAssistantId;
+    while (!done) {
+      const step = await reader.read();
+      done = step.done;
+      buffer += decoder.decode(step.value ?? new Uint8Array(), { stream: !done });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+      for (const frame of frames) {
+        const parsed = parseSseFrame(frame);
+        if (!parsed) continue;
+        const { event, data } = parsed;
+        if (event === "message_started") {
+          const payload = data as { user_message?: Record<string, unknown>; assistant_message?: Record<string, unknown> };
+          if (payload.user_message && payload.assistant_message) {
+            const realUser = normalizeMessage(payload.user_message);
+            const realAssistant = normalizeMessage(payload.assistant_message);
+            actualAssistantId = realAssistant.id;
+            setItems((current) =>
+              current.map((item) => {
+                if (item.id !== params.conversationId) return item;
+                return {
+                  ...item,
+                  messages: item.messages.map((message) =>
+                    message.id === params.tempUserId ? realUser : message.id === params.tempAssistantId ? realAssistant : message,
+                  ),
+                };
+              }),
+            );
+          }
+          continue;
+        }
+        if (event === "content_delta") {
+          const payload = data as { message_id?: string; delta?: string };
+          const messageId = payload.message_id ?? actualAssistantId;
+          const delta = payload.delta ?? "";
+          if (!delta) continue;
+          setItems((current) =>
+            current.map((item) => {
+              if (item.id !== params.conversationId) return item;
+              return {
+                ...item,
+                messages: item.messages.map((message) =>
+                  message.id === messageId ? { ...message, status: "streaming", content: `${message.content}${delta}`, error: undefined } : message,
+                ),
+              };
+            }),
+          );
+          continue;
+        }
+        if (event === "message_snapshot" || event === "message_completed" || event === "message_failed") {
+          const snapshot = normalizeMessage(data);
+          actualAssistantId = snapshot.id;
+          setItems((current) =>
+            current.map((item) => {
+              if (item.id !== params.conversationId) return item;
+              const exists = item.messages.some((message) => message.id === snapshot.id || message.id === params.tempAssistantId);
+              if (!exists) {
+                return { ...item, messages: [...item.messages, snapshot] };
+              }
+              return {
+                ...item,
+                messages: item.messages.map((message) =>
+                  message.id === snapshot.id || message.id === params.tempAssistantId ? snapshot : message,
+                ),
+              };
+            }),
+          );
+          if (event === "message_completed") {
+            return;
+          }
+          if (event === "message_failed") {
+            throw new Error(snapshot.error || "Provider error.");
+          }
+        }
+      }
     }
   }
 
@@ -282,8 +434,10 @@ export function WorkspaceChat({
     const payload = (await response.json()) as { conversation: Record<string, unknown> };
     const updated = normalizeConversation(payload.conversation);
     setItems((current) => {
-      const exists = current.some((item) => item.id === updated.id);
-      return exists ? current.map((item) => (item.id === updated.id ? updated : item)) : [updated, ...current];
+      const existing = current.find((item) => item.id === updated.id);
+      const merged = existing ? mergeConversation(existing, updated) : updated;
+      const exists = current.some((item) => item.id === merged.id);
+      return exists ? current.map((item) => (item.id === merged.id ? merged : item)) : [merged, ...current];
     });
     setSelectedId(updated.id);
   }
@@ -297,6 +451,80 @@ export function WorkspaceChat({
     }, 2000);
     return () => clearInterval(handle);
   }, [conversation?.id, conversation?.messages]);
+
+  useEffect(() => {
+    if (!activeWorkflowId) {
+      setWorkflowStatus(null);
+      setWorkflowLogs([]);
+      return;
+    }
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) return;
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      try {
+        const [statusResponse, logsResponse] = await Promise.all([
+          fetch(`${apiBaseUrl}/executions/${activeWorkflowId}/status`, { headers: { Accept: "application/json" }, cache: "no-store" }),
+          fetch(`${apiBaseUrl}/executions/${activeWorkflowId}/logs`, { headers: { Accept: "application/json" }, cache: "no-store" }),
+        ]);
+        if (!statusResponse.ok || !logsResponse.ok || cancelled) return;
+        const statusPayload = (await statusResponse.json()) as { status: string };
+        const logsPayload = (await logsResponse.json()) as { events: readonly Record<string, unknown>[] };
+        if (cancelled) return;
+        setWorkflowStatus(statusPayload.status);
+        setWorkflowLogs(
+          (logsPayload.events ?? []).map((event) => ({
+            id: String(event.id ?? ""),
+            message: String(event.message ?? ""),
+            type: String(event.type ?? ""),
+          })),
+        );
+      } catch {
+        // ignore transient poll errors
+      }
+    };
+    void load();
+    const handle = setInterval(() => void load(), 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [activeWorkflowId]);
+
+  useEffect(() => {
+    if (!conversation?.id) return;
+    const stream = connectChatStream(
+      conversation.id,
+      (event) => {
+        if (event.type !== "message_created" && event.type !== "execution_progress") {
+          return;
+        }
+        const payload = event.payload;
+        if (!payload || typeof payload !== "object") {
+          return;
+        }
+        if (!("role" in payload) || !("id" in payload)) {
+          return;
+        }
+        const incoming = normalizeMessage(payload as Record<string, unknown>);
+        setItems((current) =>
+          current.map((item) => {
+            if (item.id !== conversation.id) return item;
+            const exists = item.messages.some((message) => message.id === incoming.id);
+            const nextMessages = exists
+              ? item.messages.map((message) => (message.id === incoming.id ? incoming : message))
+              : [...item.messages, incoming];
+            return { ...item, messages: nextMessages, updatedAt: event.created_at };
+          }),
+        );
+      },
+      () => {
+        setNotice("Live updates disconnected. Polling fallback is active.");
+      },
+    );
+    if (!stream) return;
+    return () => stream.close();
+  }, [conversation?.id]);
 
   async function refreshConversations(): Promise<void> {
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -425,16 +653,7 @@ function normalizeConversation(item: Record<string, unknown>): WorkspaceConversa
     id: String(item.id),
     title: String(item.title),
     updatedAt: String(item.updated_at ?? item.updatedAt ?? ""),
-    messages: messages.map((message) => ({
-      id: String(message.id),
-      role: String(message.role) as WorkspaceConversationSummary["messages"][number]["role"],
-      content: String(message.content ?? ""),
-      status: message.status ? String(message.status) as WorkspaceConversationSummary["messages"][number]["status"] : undefined,
-      error: message.error ? String(message.error) : undefined,
-      attachmentIds: Array.isArray(message.attachment_ids) ? message.attachment_ids.map(String) : [],
-      workflowId: message.workflow_id ? String(message.workflow_id) : undefined,
-      createdAt: String(message.created_at ?? ""),
-    })),
+    messages: messages.map(normalizeMessage),
     attachments: attachments.map((attachment) => ({
       id: String(attachment.id),
       kind: String(attachment.kind) as WorkspaceConversationSummary["attachments"][number]["kind"],
@@ -444,4 +663,72 @@ function normalizeConversation(item: Record<string, unknown>): WorkspaceConversa
       sizeBytes: Number(attachment.size_bytes ?? 0),
     })),
   };
+}
+
+function mergeConversation(
+  current: WorkspaceConversationSummary,
+  incoming: WorkspaceConversationSummary,
+): WorkspaceConversationSummary {
+  const byId = new Map(current.messages.map((message) => [message.id, message]));
+  for (const next of incoming.messages) {
+    const previous = byId.get(next.id);
+    if (!previous) {
+      byId.set(next.id, next);
+      continue;
+    }
+    byId.set(next.id, preferMessage(previous, next));
+  }
+  return {
+    ...current,
+    ...incoming,
+    messages: Array.from(byId.values()).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
+    attachments: incoming.attachments.length >= current.attachments.length ? incoming.attachments : current.attachments,
+  };
+}
+
+function preferMessage(
+  left: WorkspaceConversationSummary["messages"][number],
+  right: WorkspaceConversationSummary["messages"][number],
+): WorkspaceConversationSummary["messages"][number] {
+  const rank = (value?: string): number => {
+    if (value === "completed") return 4;
+    if (value === "failed" || value === "cancelled") return 3;
+    if (value === "streaming") return 2;
+    if (value === "pending") return 1;
+    return 0;
+  };
+  const leftRank = rank(left.status);
+  const rightRank = rank(right.status);
+  if (rightRank > leftRank) return right;
+  if (leftRank > rightRank) return { ...right, status: left.status, error: left.error, content: left.content || right.content };
+  if ((right.content ?? "").length > (left.content ?? "").length) return right;
+  if ((left.content ?? "").length > (right.content ?? "").length) return { ...right, content: left.content, status: left.status, error: left.error };
+  return right;
+}
+
+function normalizeMessage(message: Record<string, unknown>): WorkspaceConversationSummary["messages"][number] {
+  return {
+    id: String(message.id),
+    role: String(message.role) as WorkspaceConversationSummary["messages"][number]["role"],
+    content: String(message.content ?? ""),
+    status: message.status ? String(message.status) as WorkspaceConversationSummary["messages"][number]["status"] : undefined,
+    error: message.error ? String(message.error) : undefined,
+    attachmentIds: Array.isArray(message.attachment_ids) ? message.attachment_ids.map(String) : [],
+    workflowId: message.workflow_id ? String(message.workflow_id) : undefined,
+    createdAt: String(message.created_at ?? ""),
+  };
+}
+
+function parseSseFrame(frame: string): { event: string; data: Record<string, unknown> } | null {
+  const lines = frame.split("\n");
+  const eventLine = lines.find((line) => line.startsWith("event:"));
+  const dataLine = lines.find((line) => line.startsWith("data:"));
+  if (!eventLine || !dataLine) return null;
+  const event = eventLine.slice("event:".length).trim();
+  const rawData = dataLine.slice("data:".length).trim();
+  try {
+    return { event, data: JSON.parse(rawData) as Record<string, unknown> };
+  } catch {
+    return null;
+  }
 }

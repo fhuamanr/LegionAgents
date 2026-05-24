@@ -339,6 +339,10 @@ export interface LlmProviderSummary {
   readonly defaultModel: string;
   readonly status: LlmProviderStatus;
   readonly agentModels: Record<string, string>;
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
+  readonly reservedOutputTokens?: number;
+  readonly maxPromptTokens?: number;
   readonly configured: boolean;
   readonly isDefault?: boolean;
   readonly updatedAt: string;
