@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
+import logging
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 from app.schemas import LMStudioLoadModelRequest, ProviderConnectivityApiRequest, ProviderConnectivityResponse, ProviderHealthResponse, ProviderListResponse, ProviderModelAssignRequest, ProviderModelProfilesResponse, ProviderResponse, ProviderUpsertApiRequest, ProviderWorkflowPreflightRequest, ProviderWorkflowPreflightResponse
 from core.agents.providers import ProviderConfig, ProviderKind, ProviderRegistry, ProviderStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderApplicationService:
@@ -35,13 +39,23 @@ class ProviderApplicationService:
                     provider_id = provider.id
                     break
         has_default = any(provider.is_default for provider in all_providers)
+        incoming_api_key = request.api_key
+        if _is_masked_secret(incoming_api_key):
+            incoming_api_key = None
+        normalized_base_url, management_base_url = _normalize_local_runtime_urls(request.base_url, request.kind)
+        metadata = dict(request.metadata or {})
+        if management_base_url is not None:
+            metadata.setdefault("management_base_url", management_base_url)
+            metadata.setdefault("inference_base_url", normalized_base_url)
+            metadata.setdefault("lm_studio_auth_mode", str(metadata.get("lm_studio_auth_mode") or "raw"))
+        resolved_default_model = request.default_model or (existing.default_model if existing else None) or ("local-model" if request.kind in {"lm_studio", "local_lm_studio"} else "default")
         provider = ProviderConfig(
             id=provider_id or uuid4(),
             name=request.name,
             kind=ProviderKind(request.kind),
-            base_url=request.base_url,
-            api_key=request.api_key if request.api_key is not None else existing.api_key if existing else None,
-            default_model=request.default_model,
+            base_url=normalized_base_url,
+            api_key=incoming_api_key if incoming_api_key is not None else existing.api_key if existing else None,
+            default_model=resolved_default_model,
             status=ProviderStatus(request.status),
             agent_models=request.agent_models,
             timeout_seconds=request.timeout_seconds,
@@ -51,7 +65,7 @@ class ProviderApplicationService:
             max_prompt_tokens=request.max_prompt_tokens if request.max_prompt_tokens is not None else (existing.max_prompt_tokens if existing else None),
             headers=request.headers,
             is_default=request.is_default or (existing.is_default if existing else not has_default),
-            metadata=request.metadata,
+            metadata=metadata,
             capabilities=(existing.capabilities if existing else {}),
             model_profiles=(existing.model_profiles if existing else {}),
         )
@@ -73,18 +87,26 @@ class ProviderApplicationService:
         await self._registry.delete(provider_id)
 
     async def test_connection(self, request: ProviderConnectivityApiRequest) -> ProviderConnectivityResponse:
+        normalized_base_url, management_base_url = _normalize_local_runtime_urls(request.base_url, request.kind)
+        metadata: dict[str, object] = {}
+        if management_base_url is not None:
+            metadata["management_base_url"] = request.management_base_url or management_base_url
+            metadata["inference_base_url"] = request.inference_base_url or normalized_base_url
+            metadata["lm_studio_auth_mode"] = str(request.lm_studio_auth_mode or "raw")
+        resolved_default_model = request.default_model or ("local-model" if request.kind in {"lm_studio", "local_lm_studio"} else "default")
         candidate = ProviderConfig(
             name=request.name,
             kind=ProviderKind(request.kind),
-            base_url=request.base_url,
+            base_url=request.inference_base_url or normalized_base_url,
             api_key=request.api_key,
-            default_model=request.default_model,
+            default_model=resolved_default_model,
             timeout_seconds=request.timeout_seconds,
             context_window_tokens=request.context_window_tokens,
             max_output_tokens=request.max_output_tokens,
             reserved_output_tokens=request.reserved_output_tokens,
             max_prompt_tokens=request.max_prompt_tokens,
             headers=request.headers,
+            metadata=metadata,
         )
         result = await self._registry.test_connection(candidate)
         return ProviderConnectivityResponse(result=result)
@@ -101,7 +123,12 @@ class ProviderApplicationService:
         )
 
     async def refresh_models(self, provider_id: UUID) -> ProviderModelProfilesResponse:
-        profiles = await self._registry.refresh_models(provider_id)
+        try:
+            profiles = await self._registry.refresh_models(provider_id)
+        except ValueError as exc:
+            if "was not found" in str(exc):
+                raise KeyError(str(provider_id)) from exc
+            raise
         return ProviderModelProfilesResponse(models=tuple(item.model_dump(mode="json") for item in profiles))
 
     async def update_model_profile(self, provider_id: UUID, model_id: str, updates: dict[str, object]) -> ProviderModelProfilesResponse:
@@ -115,7 +142,7 @@ class ProviderApplicationService:
 
     def assert_local_model_management_enabled(self) -> None:
         if not self._local_model_management_enabled:
-            raise ValueError("Local model management is disabled. Set ENABLE_LOCAL_MODEL_MANAGEMENT=true for trusted deployments.")
+            raise ValueError("local_model_management_disabled: Set ENABLE_LOCAL_MODEL_MANAGEMENT=true for trusted deployments.")
 
     async def assign_agent_model(
         self,
@@ -137,6 +164,13 @@ class ProviderApplicationService:
         return await self._registry.lmstudio_list_runtime_models(provider_id)
 
     async def lmstudio_load_model(self, provider_id: UUID, request: LMStudioLoadModelRequest) -> ProviderModelProfilesResponse:
+        logger.info(
+            "local_model_load_request_received provider_id=%s selected_model_id=%s context_length=%s feature_flag_enabled=%s",
+            provider_id,
+            request.model_id,
+            request.context_length,
+            self._local_model_management_enabled,
+        )
         self.assert_local_model_management_enabled()
         await self._registry.lmstudio_load_model(
             provider_id,
@@ -156,6 +190,12 @@ class ProviderApplicationService:
         return ProviderModelProfilesResponse(models=tuple(item.model_dump(mode="json") for item in provider.model_profiles.values()))
 
     async def lmstudio_unload_model(self, provider_id: UUID, *, model_id: str) -> ProviderModelProfilesResponse:
+        logger.info(
+            "local_model_unload_request_received provider_id=%s selected_model_id=%s feature_flag_enabled=%s",
+            provider_id,
+            model_id,
+            self._local_model_management_enabled,
+        )
         self.assert_local_model_management_enabled()
         await self._registry.lmstudio_unload_model(provider_id, model_id=model_id)
         provider = await self._registry.get(provider_id)
@@ -195,3 +235,29 @@ class ProviderApplicationService:
                 recommendations.append("Use BA-only or BA+Architect mode, or increase context to 8192 if stable.")
         ok = len(warnings) == 0
         return ProviderWorkflowPreflightResponse(ok=ok, warnings=tuple(warnings), recommendations=tuple(recommendations))
+
+
+def _is_masked_secret(value: str | None) -> bool:
+    if value is None:
+        return False
+    candidate = value.strip()
+    if not candidate:
+        return False
+    return "..." in candidate or "*" in candidate
+
+
+def _normalize_local_runtime_urls(base_url: str | None, kind: str) -> tuple[str | None, str | None]:
+    if kind not in {"lm_studio", "local_lm_studio"}:
+        return base_url, None
+    if not base_url:
+        return None, None
+    raw = base_url.strip().rstrip("/")
+    parsed = urlsplit(raw)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/api/v1"):
+        path = path[: -len("/api/v1")]
+    elif path.endswith("/v1"):
+        path = path[: -len("/v1")]
+    management_base = urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
+    inference_base = f"{management_base}/v1"
+    return inference_base, management_base

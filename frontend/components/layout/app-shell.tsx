@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { Activity, BookOpenText, Boxes, Bug, FilePenLine, GitPullRequest, LayoutDashboard, RadioTower, UserCheck, BarChart3, ShieldCheck, MessageSquareText, ServerCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -26,6 +29,7 @@ const navItems: readonly NavItem[] = [
 ];
 
 export function AppShell({ children }: Readonly<{ children: ReactNode }>): JSX.Element {
+  const pathname = usePathname();
   return (
     <div className="min-h-screen bg-background">
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-card lg:block">
@@ -40,7 +44,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>): JSX.E
         </div>
         <nav className="space-y-1 p-3">
           {navItems.map((item) => (
-            <Button key={item.href} asChild variant="ghost" className="w-full justify-start">
+            <Button key={item.href} asChild variant={pathname === item.href ? "secondary" : "ghost"} className="w-full justify-start">
               <Link href={item.href as never}>
                 <item.icon className="h-4 w-4" aria-hidden="true" />
                 {item.label}

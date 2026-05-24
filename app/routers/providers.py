@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies.container import get_provider_service
-from app.dependencies.security import require_permissions
+from app.dependencies.security import require_permissions, require_permissions_or_local_management
 from app.schemas import LMStudioDownloadModelRequest, LMStudioLoadModelRequest, LMStudioRuntimeModelsResponse, LMStudioUnloadModelRequest, ProviderConnectivityApiRequest, ProviderConnectivityResponse, ProviderHealthResponse, ProviderListResponse, ProviderModelAssignRequest, ProviderModelProfileUpdateRequest, ProviderModelProfilesResponse, ProviderResponse, ProviderUpsertApiRequest, ProviderWorkflowPreflightRequest, ProviderWorkflowPreflightResponse
 from app.services.provider_service import ProviderApplicationService
 from core.contracts.security import SecurityPermission
@@ -106,8 +106,10 @@ async def refresh_provider_models(
 ) -> ProviderModelProfilesResponse:
     try:
         return await service.refresh_models(provider_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Provider not found.") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/{provider_id}/models/{model_id}", response_model=ProviderModelProfilesResponse)
@@ -128,7 +130,7 @@ async def update_provider_model_profile(
 async def lmstudio_runtime_models(
     provider_id: UUID,
     service: ProviderApplicationService = Depends(get_provider_service),
-    _: object = Depends(require_permissions(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
+    _: object = Depends(require_permissions_or_local_management(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
 ) -> LMStudioRuntimeModelsResponse:
     try:
         payload = await service.lmstudio_runtime_models(provider_id)
@@ -147,7 +149,7 @@ async def lmstudio_load_model(
     provider_id: UUID,
     request: LMStudioLoadModelRequest,
     service: ProviderApplicationService = Depends(get_provider_service),
-    _: object = Depends(require_permissions(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
+    _: object = Depends(require_permissions_or_local_management(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
 ) -> ProviderModelProfilesResponse:
     try:
         return await service.lmstudio_load_model(provider_id, request)
@@ -160,7 +162,7 @@ async def lmstudio_unload_model(
     provider_id: UUID,
     request: LMStudioUnloadModelRequest,
     service: ProviderApplicationService = Depends(get_provider_service),
-    _: object = Depends(require_permissions(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
+    _: object = Depends(require_permissions_or_local_management(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
 ) -> ProviderModelProfilesResponse:
     try:
         return await service.lmstudio_unload_model(provider_id, model_id=request.model_id)
@@ -173,7 +175,7 @@ async def lmstudio_download_model(
     provider_id: UUID,
     request: LMStudioDownloadModelRequest,
     service: ProviderApplicationService = Depends(get_provider_service),
-    _: object = Depends(require_permissions(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
+    _: object = Depends(require_permissions_or_local_management(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
 ) -> ProviderConnectivityResponse:
     try:
         return await service.lmstudio_download_model(provider_id, model_id=request.model_id)
@@ -187,7 +189,7 @@ async def lmstudio_download_status(
     download_id: str | None = None,
     model: str | None = None,
     service: ProviderApplicationService = Depends(get_provider_service),
-    _: object = Depends(require_permissions(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
+    _: object = Depends(require_permissions_or_local_management(SecurityPermission.GOVERNANCE_WRITE, any_permission=True)),
 ) -> ProviderConnectivityResponse:
     try:
         return await service.lmstudio_download_status(provider_id, download_id=download_id, model=model)

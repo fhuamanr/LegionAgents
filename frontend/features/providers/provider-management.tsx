@@ -59,6 +59,8 @@ export function ProviderManagement({
   const [runtimeParallelByProvider, setRuntimeParallelByProvider] = useState<Record<string, string>>({});
   const [flashAttentionByProvider, setFlashAttentionByProvider] = useState<Record<string, boolean>>({});
   const [runtimeBusyByProvider, setRuntimeBusyByProvider] = useState<Record<string, boolean>>({});
+  const [tokenByProvider, setTokenByProvider] = useState<Record<string, string>>({});
+  const [authModeByProvider, setAuthModeByProvider] = useState<Record<string, "raw" | "bearer">>({});
   const [agentOverridesByProvider, setAgentOverridesByProvider] = useState<Record<string, Record<string, AgentOverride>>>({});
   const active = providerItems.filter((provider) => provider.status === "active");
 
@@ -81,7 +83,7 @@ export function ProviderManagement({
             <SelectField label="Kind" value={kind} onChange={setKind} options={["openai", "cursor", "openrouter", "ollama", "lm_studio", "local_lm_studio", "local", "custom"]} />
             <Field label="Base URL" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={setBaseUrl} />
             <Field label="Default model" placeholder="gpt-5-mini" value={defaultModel} onChange={setDefaultModel} required />
-            <Field label="API key" placeholder="sk-..." value={apiKey} onChange={setApiKey} type="password" />
+            <Field label="API key / local token" placeholder="sk-..." value={apiKey} onChange={setApiKey} type="password" />
             <Field label="Context window" placeholder="4096" value={contextWindowTokens} onChange={setContextWindowTokens} />
             <Field label="Reserved output" placeholder="1024" value={reservedOutputTokens} onChange={setReservedOutputTokens} />
             <Field label="Max prompt tokens" placeholder="3000" value={maxPromptTokens} onChange={setMaxPromptTokens} />
@@ -106,6 +108,9 @@ export function ProviderManagement({
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             Local/Controlled Runtime Mode: model lifecycle management, runtime context tuning, and compact workflow safety controls.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            LM Studio/Ollama local providers may require API token authentication. Save the local token in the provider to enable model list/load/unload.
           </p>
         </CardContent>
       </Card>
@@ -147,11 +152,12 @@ export function ProviderManagement({
                   </dl>
 
                   {renderDefaultAssignment(provider)}
+                  {renderTokenEditor(provider)}
                   {renderAdvancedOverrides(provider)}
 
                   <div className="mt-4 flex gap-2">
                     <Button variant="outline" size="sm" onClick={() => void refreshModels(provider.id)}>
-                      Refresh models
+                      List models
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => void saveAgentAssignments(provider)}>
                       Save assignments
@@ -430,6 +436,40 @@ export function ProviderManagement({
     );
   }
 
+  function renderTokenEditor(provider: LlmProviderSummary): JSX.Element | null {
+    if (!isLocalProvider(provider.kind)) return null;
+    const value = tokenByProvider[provider.id] ?? "";
+    const authMode = authModeByProvider[provider.id] ?? String(provider.metadata?.lm_studio_auth_mode ?? "raw");
+    return (
+      <div className="mt-3 rounded-md border bg-muted/30 p-3">
+        <div className="mb-2 text-xs font-semibold">Local Runtime Token</div>
+        <div className="grid gap-2 md:grid-cols-[1fr_11rem_auto]">
+          <input
+            type="password"
+            value={value}
+            onChange={(event) => setTokenByProvider((current) => ({ ...current, [provider.id]: event.target.value }))}
+            placeholder="Paste LM Studio/Ollama API token"
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+          />
+          <select
+            value={authMode}
+            onChange={(event) => setAuthModeByProvider((current) => ({ ...current, [provider.id]: event.target.value as "raw" | "bearer" }))}
+            className="h-9 rounded-md border bg-background px-2 text-sm"
+          >
+            <option value="raw">Auth mode: raw</option>
+            <option value="bearer">Auth mode: bearer</option>
+          </select>
+          <Button variant="outline" size="sm" onClick={() => void saveProviderToken(provider.id)}>
+            Save token
+          </Button>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Authorization header mode controls whether token is sent as raw value or Bearer token.
+        </p>
+      </div>
+    );
+  }
+
   function resolveOverrides(provider: LlmProviderSummary): Record<string, AgentOverride> {
     const local = agentOverridesByProvider[provider.id];
     if (local) return local;
@@ -472,7 +512,7 @@ export function ProviderManagement({
           kind,
           base_url: baseUrl.trim() || null,
           api_key: apiKey.trim() || null,
-          default_model: defaultModel,
+          default_model: defaultModel || (isLocalProvider(kind) ? "local-model" : "default"),
           status: "active",
           is_default: isDefault,
           context_window_tokens: parseInt(contextWindowTokens || "0", 10) || null,
@@ -505,6 +545,7 @@ export function ProviderManagement({
           name: provider.name,
           kind: provider.kind,
           base_url: provider.baseUrl ?? null,
+          api_key: null,
           default_model: selectedModel,
           status: provider.status,
           context_window_tokens: contextWindow,
@@ -525,6 +566,7 @@ export function ProviderManagement({
             selected_context: contextWindow,
             parallel_slots: parallelSlots,
             compact_mode_enabled: contextWindow <= 8192,
+            lm_studio_auth_mode: authModeByProvider[provider.id] ?? String(provider.metadata?.lm_studio_auth_mode ?? "raw"),
             agent_runtime_overrides: overrides,
           },
           is_default: provider.isDefault ?? false,
@@ -535,6 +577,47 @@ export function ProviderManagement({
       setMessage("Assignments saved and persisted.");
     } catch (error) {
       setMessage(`Assignment save failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+
+  async function saveProviderToken(providerId: string): Promise<void> {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) return;
+    const provider = providerItems.find((item) => item.id === providerId);
+    const token = tokenByProvider[providerId]?.trim();
+    if (!provider || !token) {
+      setMessage("Token is required.");
+      return;
+    }
+    try {
+      const response = await fetch(`${apiBaseUrl}/providers/${providerId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          name: provider.name,
+          kind: provider.kind,
+          base_url: provider.baseUrl ?? null,
+          api_key: token,
+          default_model: provider.defaultModel,
+          status: provider.status,
+          agent_models: provider.agentModels,
+          context_window_tokens: provider.contextWindowTokens ?? 8192,
+          max_output_tokens: provider.maxOutputTokens ?? 1024,
+          reserved_output_tokens: provider.reservedOutputTokens ?? 1024,
+          max_prompt_tokens: provider.maxPromptTokens ?? null,
+          metadata: {
+            ...(provider.metadata ?? {}),
+            lm_studio_auth_mode: authModeByProvider[provider.id] ?? String(provider.metadata?.lm_studio_auth_mode ?? "raw"),
+          },
+          is_default: provider.isDefault ?? false,
+        }),
+      });
+      if (!response.ok) throw new Error(await extractError(response));
+      setTokenByProvider((current) => ({ ...current, [providerId]: "" }));
+      await refreshProviders();
+      setMessage("Local runtime token saved.");
+    } catch (error) {
+      setMessage(`Token save failed: ${error instanceof Error ? error.message : "unknown error"}`);
     }
   }
 
@@ -560,7 +643,7 @@ export function ProviderManagement({
       });
       if (!response.ok) {
         const error = await extractError(response);
-        setMessage(error.includes("lm_studio_token_missing") ? "LM Studio API token is required for model listing/loading/unloading." : error.includes("lm_studio_token_rejected") ? "LM Studio rejected the API token." : `Load failed: ${error}`);
+        setMessage(error.includes("lm_studio_token_missing") ? "LM Studio API token is required for model listing/loading/unloading." : error.includes("lm_studio_token_rejected") || error.includes("401") ? "Unauthorized. Check LM Studio token and Authorization mode." : `Load failed: ${error}`);
         return;
       }
       await refreshProviders();
@@ -584,7 +667,7 @@ export function ProviderManagement({
       });
       if (!response.ok) {
         const error = await extractError(response);
-        setMessage(error.includes("lm_studio_token_missing") ? "LM Studio API token is required for model listing/loading/unloading." : error.includes("lm_studio_token_rejected") ? "LM Studio rejected the API token." : `Unload failed: ${error}`);
+        setMessage(error.includes("lm_studio_token_missing") ? "LM Studio API token is required for model listing/loading/unloading." : error.includes("lm_studio_token_rejected") || error.includes("401") ? "Unauthorized. Check LM Studio token and Authorization mode." : `Unload failed: ${error}`);
         return;
       }
       await refreshProviders();
@@ -608,10 +691,13 @@ export function ProviderManagement({
           kind,
           base_url: baseUrl.trim() || null,
           api_key: apiKey.trim() || null,
-          default_model: defaultModel,
+          default_model: defaultModel || (isLocalProvider(kind) ? "local-model" : "default"),
           context_window_tokens: parseInt(contextWindowTokens || "0", 10) || null,
           reserved_output_tokens: parseInt(reservedOutputTokens || "0", 10) || null,
           max_prompt_tokens: parseInt(maxPromptTokens || "0", 10) || null,
+          management_base_url: isLocalProvider(kind) ? stripLmStudioSuffix(baseUrl.trim() || "") : null,
+          inference_base_url: isLocalProvider(kind) ? `${stripLmStudioSuffix(baseUrl.trim() || "")}/v1` : null,
+          lm_studio_auth_mode: isLocalProvider(kind) ? "raw" : null,
         }),
       });
       if (!response.ok) throw new Error(await extractError(response));
@@ -641,7 +727,7 @@ export function ProviderManagement({
       return;
     }
     await refreshProviders();
-    setMessage("Models refreshed.");
+    setMessage("Model list updated.");
   }
 }
 
@@ -651,11 +737,36 @@ function isLocalProvider(kind: string): boolean {
 
 async function extractError(response: Response): Promise<string> {
   try {
-    const payload = (await response.json()) as { detail?: string };
-    return payload.detail || `${response.status} ${response.statusText}`;
+    const payload = (await response.json()) as { detail?: unknown; message?: unknown; error?: unknown };
+    if (typeof payload.detail === "string") return payload.detail;
+    if (Array.isArray(payload.detail)) {
+      return payload.detail
+        .map((item) => {
+          if (!item || typeof item !== "object") return String(item);
+          const row = item as Record<string, unknown>;
+          const loc = Array.isArray(row.loc) ? row.loc.join(".") : "field";
+          const msg = typeof row.msg === "string" ? row.msg : JSON.stringify(row);
+          return `${loc}: ${msg}`;
+        })
+        .join("; ");
+    }
+    if (payload.detail && typeof payload.detail === "object") return JSON.stringify(payload.detail);
+    if (typeof payload.message === "string") return payload.message;
+    if (payload.message && typeof payload.message === "object") return JSON.stringify(payload.message);
+    if (typeof payload.error === "string") return payload.error;
+    if (payload.error && typeof payload.error === "object") return JSON.stringify(payload.error);
+    return `${response.status} ${response.statusText}`;
   } catch {
     return `${response.status} ${response.statusText}`;
   }
+}
+
+function stripLmStudioSuffix(value: string): string {
+  const raw = value.trim().replace(/\/+$/, "");
+  if (!raw) return raw;
+  if (raw.endsWith("/api/v1")) return raw.slice(0, -"/api/v1".length);
+  if (raw.endsWith("/v1")) return raw.slice(0, -"/v1".length);
+  return raw;
 }
 
 function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {

@@ -49,11 +49,13 @@ class LMStudioClient:
         api_key: str | None = None,
         timeout_seconds: float | None = None,
         headers: dict[str, str] | None = None,
+        auth_mode: str = "raw",
     ) -> None:
         self._base_url = _normalize_base_url(base_url)
         self._api_key = (api_key or "").strip()
         self._timeout = timeout_seconds or 30
         self._headers = headers or {}
+        self._auth_mode = auth_mode if auth_mode in {"raw", "bearer"} else "raw"
 
     def list_models(self) -> dict[str, Any]:
         return self._request_json("GET", "/api/v1/models")
@@ -78,6 +80,15 @@ class LMStudioClient:
     def unload_model(self, instance_id: str) -> dict[str, Any]:
         return self._request_json("POST", "/api/v1/models/unload", body={"instance_id": instance_id})
 
+    def download_model(self, model_id: str) -> dict[str, Any]:
+        return self._request_json("POST", "/api/v1/models/download", body={"model": model_id})
+
+    def download_status(self, *, model: str | None = None) -> dict[str, Any]:
+        suffix = ""
+        if model:
+            suffix = f"?model={model}"
+        return self._request_json("GET", f"/api/v1/models/download/status{suffix}")
+
     def chat_completion(self, *, model: str, messages: list[dict[str, str]], stream: bool = False, max_tokens: int | None = None) -> dict[str, Any]:
         body: dict[str, Any] = {"model": model, "messages": messages, "stream": stream}
         if max_tokens is not None:
@@ -93,7 +104,8 @@ class LMStudioClient:
             )
         url = f"{self._base_url}{path}"
         request_body = None if body is None else json.dumps(body).encode("utf-8")
-        headers = {"Accept": "application/json", **self._headers, "Authorization": f"Bearer {self._api_key}"}
+        auth_value = self._api_key if self._auth_mode == "raw" else f"Bearer {self._api_key}"
+        headers = {"Accept": "application/json", **self._headers, "Authorization": auth_value}
         if request_body is not None:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=request_body, headers=headers, method=method)
@@ -115,6 +127,8 @@ class LMStudioClient:
                 "/api/v1/models": "lm_studio_list_failed",
                 "/api/v1/models/load": "lm_studio_load_failed",
                 "/api/v1/models/unload": "lm_studio_unload_failed",
+                "/api/v1/models/download": "lm_studio_download_failed",
+                "/api/v1/models/download/status": "lm_studio_download_status_failed",
             }.get(path, "lm_studio_endpoint_unavailable")
             raise LMStudioClientError(
                 code=code,

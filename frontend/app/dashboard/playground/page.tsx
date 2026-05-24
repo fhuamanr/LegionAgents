@@ -1,5 +1,10 @@
+import { AppShell } from "@/components/layout/app-shell";
 import { AgentPlayground } from "@/features/playground/agent-playground";
 
 export default function PlaygroundPage(): JSX.Element {
-  return <AgentPlayground />;
+  return (
+    <AppShell>
+      <AgentPlayground />
+    </AppShell>
+  );
 }

@@ -65,12 +65,15 @@ class ProviderConnectivityApiRequest(ApiModel):
     kind: str = Field(min_length=1)
     base_url: str | None = None
     api_key: str | None = None
-    default_model: str = Field(min_length=1)
+    default_model: str | None = None
     timeout_seconds: float | None = 60
     context_window_tokens: int | None = 8192
     max_output_tokens: int | None = 1024
     reserved_output_tokens: int | None = 1024
     max_prompt_tokens: int | None = None
+    management_base_url: str | None = None
+    inference_base_url: str | None = None
+    lm_studio_auth_mode: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
 
 

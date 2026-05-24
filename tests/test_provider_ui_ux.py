@@ -27,4 +27,24 @@ def test_provider_has_per_agent_overrides_section() -> None:
 def test_provider_ui_shows_lmstudio_load_unload_token_errors() -> None:
     text = Path("frontend/features/providers/provider-management.tsx").read_text(encoding="utf-8")
     assert "LM Studio API token is required for model listing/loading/unloading." in text
-    assert "LM Studio rejected the API token." in text
+    assert "Unauthorized. Check LM Studio token and Authorization mode." in text
+
+
+def test_provider_ui_has_local_runtime_token_editor() -> None:
+    text = Path("frontend/features/providers/provider-management.tsx").read_text(encoding="utf-8")
+    assert "Local Runtime Token" in text
+    assert "Save token" in text
+    assert "Paste LM Studio/Ollama API token" in text
+
+
+def test_provider_ui_includes_auth_mode_selector_and_human_readable_401_message() -> None:
+    text = Path("frontend/features/providers/provider-management.tsx").read_text(encoding="utf-8")
+    assert "Auth mode: raw" in text
+    assert "Auth mode: bearer" in text
+    assert "Unauthorized. Check LM Studio token and Authorization mode." in text
+
+
+def test_provider_ui_extract_error_renders_structured_detail_instead_of_object_object() -> None:
+    text = Path("frontend/features/providers/provider-management.tsx").read_text(encoding="utf-8")
+    assert "Array.isArray(payload.detail)" in text
+    assert "JSON.stringify(payload.detail)" in text
