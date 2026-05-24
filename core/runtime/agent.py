@@ -16,6 +16,7 @@ from core.runtime.models import RuntimeAgentConfig, RuntimeExecutionContext
 from core.runtime.prompts import PromptBuilder, RuntimePromptBuilder
 from core.runtime.retry import RetryEngine
 from core.runtime.tools import ToolRegistry
+from core.runtime.context_governor import ContextGovernor
 from core.runtime.validation import OutputValidator
 
 TOutput = TypeVar("TOutput", bound=BaseModel)
@@ -41,6 +42,7 @@ class BaseAgent(ABC, Generic[TOutput]):
         self._retry_engine = retry_engine or RetryEngine()
         self._tool_registry = tool_registry or ToolRegistry()
         self._logger = logger or logging.getLogger(f"{__name__}.{config.name}")
+        self._context_governor = ContextGovernor()
 
     async def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
         """Execute this agent with isolated context, retries, and validation."""
@@ -96,7 +98,12 @@ class BaseAgent(ABC, Generic[TOutput]):
         raw_output = await self.invoke(runtime_context)
         duration_seconds = max(0.0, time.perf_counter() - started)
         await self._enforce_governance_output(runtime_context, raw_output)
-        parse_strategy = "ba_sections" if (self.config.name == "ba" and bool(request.metadata.get("local_lm_studio_safe_mode", False))) else None
+        requested_parser = str(request.metadata.get("parser_strategy", "")).strip().lower()
+        parse_strategy = None
+        if requested_parser == "markdown_sections":
+            parse_strategy = "ba_sections"
+        elif self.config.name == "ba" and bool(request.metadata.get("local_lm_studio_safe_mode", False)):
+            parse_strategy = "ba_sections"
         structured_output = await self._output_validator.validate(raw_output, strategy=parse_strategy)
         validation_metadata = dict(getattr(self._output_validator, "last_validation_metadata", {}))
         await self._enforce_governance_output(runtime_context, raw_output, structured_output)
@@ -239,25 +246,15 @@ class BaseAgent(ABC, Generic[TOutput]):
             "sections_removed": 0,
             "final_prompt_tokens": before,
         }
-        budgets = {
-            "ba": 900,
-            "architect": 1200,
-            "developer": 1400,
-            "qa": 1000,
-            "docs": 900,
-            "pr": 700,
-        }
-        output_budgets = {
-            "ba": 450,
-            "architect": 600,
-            "developer": 700,
-            "qa": 500,
-            "docs": 500,
-            "pr": 350,
-        }
-        max_tokens = int(budgets.get(self.config.name, 1200))
+        profile = request.metadata.get("agent_profile", {}) if isinstance(request.metadata.get("agent_profile", {}), dict) else {}
+        budget = self._context_governor.budget_for(
+            self.config.name,
+            local_compact_mode=safe_mode,
+            overrides=profile,
+        )
+        max_tokens = budget.prompt_max_tokens
         obs["budget"] = max_tokens
-        obs["output_budget"] = int(output_budgets.get(self.config.name, 600))
+        obs["output_budget"] = budget.output_max_tokens
         if not safe_mode:
             return prompt_messages, obs
         if before <= max_tokens:
@@ -299,16 +296,19 @@ class BaseAgent(ABC, Generic[TOutput]):
             prompt_messages[0].model_copy(update={"content": compact_system}),
             prompt_messages[1].model_copy(update={"content": compact_user}),
         )
-        after = sum(max(1, len(message.content) // 4) for message in compact)
+        compact, decision = self._context_governor.enforce_prompt_budget(compact, budget=max_tokens)
+        after = decision.prompt_tokens_after
         obs.update(
             {
                 "prompt_tokens_after": after,
                 "sections_removed": 1,
                 "final_prompt_tokens": after,
                 "compression_applied": True,
+                "context_budget_estimated": True,
+                "oversized_prompt_blocked": decision.blocked,
             }
         )
-        if after > max_tokens:
+        if decision.blocked:
             raise ValueError(
                 f"{self.config.name} prompt too large for local safe mode after reduction. "
                 f"prompt_tokens_before={before} prompt_tokens_after={after} max_prompt_tokens={max_tokens}"

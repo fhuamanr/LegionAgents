@@ -97,6 +97,48 @@ class ProviderModelProfilesResponse(ApiModel):
     models: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
 
 
+class ProviderModelAssignRequest(ApiModel):
+    model_id: str = Field(min_length=1)
+
+
+class LMStudioLoadModelRequest(ApiModel):
+    model_id: str = Field(min_length=1)
+    context_length: int | None = None
+    max_output_tokens: int | None = None
+    parallel_slots: int | None = None
+    gpu_offload: int | None = None
+    temperature: float | None = None
+    streaming_enabled: bool | None = None
+
+
+class LMStudioUnloadModelRequest(ApiModel):
+    model_id: str = Field(min_length=1)
+
+
+class LMStudioDownloadModelRequest(ApiModel):
+    model_id: str = Field(min_length=1)
+
+
+class LMStudioDownloadStatusResponse(ApiModel):
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
+class LMStudioRuntimeModelsResponse(ApiModel):
+    available: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+    loaded: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+
+
+class ProviderWorkflowPreflightRequest(ApiModel):
+    workflow_mode: str = "full"
+    required_agents: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class ProviderWorkflowPreflightResponse(ApiModel):
+    ok: bool
+    warnings: tuple[str, ...] = Field(default_factory=tuple)
+    recommendations: tuple[str, ...] = Field(default_factory=tuple)
+
+
 class UserStoryUploadRequest(ApiModel):
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)
@@ -123,6 +165,56 @@ class WorkflowResponse(ApiModel):
     thread_id: str | None = None
     created_at: datetime
     updated_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentPlaygroundRunRequest(ApiModel):
+    workflow_id: UUID | None = None
+    agent_name: str = Field(min_length=1)
+    input_source: str = Field(default="manual_prompt", min_length=1)
+    prompt: str = ""
+    uploaded_text: str | None = None
+    previous_agent: str | None = None
+    artifact_id: str | None = None
+    provider_id: str | None = None
+    model: str | None = None
+    local_lm_studio_safe_mode: bool = False
+    compact_mode_enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentPlaygroundArtifactSummary(ApiModel):
+    id: str
+    workflow_id: UUID
+    execution_id: UUID
+    agent_name: str
+    provider_id: str | None = None
+    model_id: str | None = None
+    raw_output: str = ""
+    structured_output: dict[str, Any] = Field(default_factory=dict)
+    handoff: str = ""
+    execution_log: str = ""
+    token_report: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class AgentPlaygroundRunResponse(ApiModel):
+    artifact: AgentPlaygroundArtifactSummary
+    warnings: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class AgentPlaygroundArtifactListResponse(ApiModel):
+    artifacts: tuple[AgentPlaygroundArtifactSummary, ...] = Field(default_factory=tuple)
+
+
+class AgentPlaygroundHandoffUpdateRequest(ApiModel):
+    handoff: str = ""
+
+
+class AgentPlaygroundWorkflowRunRequest(ApiModel):
+    task: str = Field(min_length=1)
+    enabled_agents: tuple[str, ...] = Field(default_factory=tuple)
+    execution_mode: str = "sequential_auto"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

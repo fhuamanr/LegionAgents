@@ -1,19 +1,34 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { CheckCircle2, Cpu, KeyRound, PlugZap, RadioTower, Save, Server, TriangleAlert, type LucideIcon } from "lucide-react";
+import { CheckCircle2, Cpu, KeyRound, PlugZap, RadioTower, Save, Search, Server, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { LlmProviderHealthCheck, LlmProviderSummary } from "@/lib/types";
+import type { LlmModelCapabilityProfile, LlmProviderHealthCheck, LlmProviderSummary } from "@/lib/types";
+
+const AGENTS = ["chat", "ba", "architect", "developer", "qa", "docs", "pr"] as const;
+type AgentName = typeof AGENTS[number];
 
 const agentLabels: Record<string, string> = {
+  chat: "Chat",
   ba: "BA",
   architect: "Architect",
   developer: "Developer",
   qa: "QA",
   docs: "Docs",
   pr: "PR",
+};
+
+type AgentOverride = {
+  use_default: boolean;
+  provider_id?: string;
+  model?: string;
+  context_window_tokens?: number;
+  max_output_tokens?: number;
+  compact_mode_enabled?: boolean;
+  streaming_enabled?: boolean;
+  parser_strategy?: string;
 };
 
 export function ProviderManagement({
@@ -37,6 +52,12 @@ export function ProviderManagement({
   const [contextWindowTokens, setContextWindowTokens] = useState("4096");
   const [reservedOutputTokens, setReservedOutputTokens] = useState("1024");
   const [maxPromptTokens, setMaxPromptTokens] = useState("3000");
+  const [selectedModelsByProvider, setSelectedModelsByProvider] = useState<Record<string, string>>({});
+  const [searchByProvider, setSearchByProvider] = useState<Record<string, string>>({});
+  const [loadedFilterByProvider, setLoadedFilterByProvider] = useState<Record<string, "all" | "loaded" | "unloaded">>({});
+  const [runtimeContextByProvider, setRuntimeContextByProvider] = useState<Record<string, string>>({});
+  const [runtimeParallelByProvider, setRuntimeParallelByProvider] = useState<Record<string, string>>({});
+  const [agentOverridesByProvider, setAgentOverridesByProvider] = useState<Record<string, Record<string, AgentOverride>>>({});
   const active = providerItems.filter((provider) => provider.status === "active");
 
   return (
@@ -55,7 +76,7 @@ export function ProviderManagement({
         <CardContent>
           <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-6" onSubmit={(event) => void saveProvider(event)}>
             <Field label="Name" placeholder="OpenAI Production" value={name} onChange={setName} required />
-            <SelectField label="Kind" value={kind} onChange={setKind} options={["openai", "cursor", "openrouter", "ollama", "lm_studio", "local", "custom"]} />
+            <SelectField label="Kind" value={kind} onChange={setKind} options={["openai", "cursor", "openrouter", "ollama", "lm_studio", "local_lm_studio", "local", "custom"]} />
             <Field label="Base URL" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={setBaseUrl} />
             <Field label="Default model" placeholder="gpt-5-mini" value={defaultModel} onChange={setDefaultModel} required />
             <Field label="API key" placeholder="sk-..." value={apiKey} onChange={setApiKey} type="password" />
@@ -79,10 +100,10 @@ export function ProviderManagement({
           </form>
           {message ? <p className="mt-3 text-xs text-muted-foreground">{message}</p> : null}
           <p className="mt-2 text-xs text-muted-foreground">
-            LM Studio in Docker: use <code>http://host.docker.internal:1234/v1</code> (not <code>http://127.0.0.1:1234/v1</code>). Small local models may require compact workflow mode.
+            Cloud Provider Mode: API consumption, model selection, no runtime lifecycle control.
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            32GB RAM guidance: prefer Qwen2.5-Coder 7B/14B Q4_K_M, set <code>n_parallel=1</code>, use <code>n_ctx=8192</code> when stable (fallback 4096), keep compact BA prompts, avoid 24B dense models, and use cloud/OpenRouter for full multi-agent workflows when local stability is low.
+            Local/Controlled Runtime Mode: model lifecycle management, runtime context tuning, and compact workflow safety controls.
           </p>
         </CardContent>
       </Card>
@@ -91,7 +112,7 @@ export function ProviderManagement({
         <Card>
           <CardHeader>
             <CardTitle>Provider Registry</CardTitle>
-          <CardDescription>Persisted providers used by workflow runtime routing.</CardDescription>
+            <CardDescription>Persisted providers used by workflow runtime routing.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {providerItems.length === 0 ? (
@@ -111,7 +132,7 @@ export function ProviderManagement({
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">{provider.kind} / {provider.defaultModel}</p>
                     </div>
-                    <Button variant="outline" size="sm" aria-label={`Use ${provider.name}`}>
+                    <Button variant="outline" size="sm">
                       {provider.configured ? "Ready" : "Needs key"}
                     </Button>
                   </div>
@@ -122,35 +143,16 @@ export function ProviderManagement({
                     <Detail label="Context" value={provider.contextWindowTokens ? `${provider.contextWindowTokens} tokens` : "default"} />
                     <Detail label="Prompt budget" value={provider.maxPromptTokens ? `${provider.maxPromptTokens}` : "auto"} />
                   </dl>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {Object.entries(provider.agentModels).length === 0 ? (
-                      <Badge variant="muted">Default model for all agents</Badge>
-                    ) : (
-                      Object.entries(provider.agentModels).map(([agent, model]) => (
-                        <Badge key={agent} variant="muted">
-                          {agentLabels[agent] ?? agent}: {model}
-                        </Badge>
-                      ))
-                    )}
-                  </div>
-                  {provider.modelProfiles && Object.keys(provider.modelProfiles).length > 0 ? (
-                    <div className="mt-4 rounded-md border bg-muted/30 p-3">
-                      <div className="mb-2 text-xs font-semibold">Discovered models</div>
-                      <div className="space-y-2">
-                        {Object.values(provider.modelProfiles).map((profile) => (
-                          <div key={profile.modelId} className="rounded border bg-background p-2 text-xs">
-                            <div className="font-medium">{profile.displayName ?? profile.modelId}</div>
-                            <div className="text-muted-foreground">
-                              ctx {profile.contextWindowTokens} | in {profile.maxInputTokens} | out {profile.maxOutputTokens} | {profile.compactModeRequired ? "compact" : "standard"}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="mt-4">
-                    <Button variant="outline" size="sm" onClick={() => void refreshModels(provider.id)} className="mr-2">
+
+                  {renderDefaultAssignment(provider)}
+                  {renderAdvancedOverrides(provider)}
+
+                  <div className="mt-4 flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => void refreshModels(provider.id)}>
                       Refresh models
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => void saveAgentAssignments(provider)}>
+                      Save assignments
                     </Button>
                     <Button variant="destructive" size="sm" onClick={() => void deleteProvider(provider.id)}>
                       Delete
@@ -191,6 +193,247 @@ export function ProviderManagement({
     </div>
   );
 
+  function renderDefaultAssignment(provider: LlmProviderSummary): JSX.Element {
+    const selectedModel = selectedModelsByProvider[provider.id] ?? provider.defaultModel;
+    const profiles = Object.values(provider.modelProfiles ?? {});
+    const search = (searchByProvider[provider.id] ?? "").toLowerCase();
+    const loadedFilter = loadedFilterByProvider[provider.id] ?? "all";
+    const filteredProfiles = profiles.filter((profile) => {
+      const matchSearch = !search || profile.modelId.toLowerCase().includes(search) || (profile.displayName ?? "").toLowerCase().includes(search);
+      const status = (profile.runtimeStatus ?? "").toLowerCase();
+      const matchLoaded = loadedFilter === "all" || (loadedFilter === "loaded" ? status === "loaded" : status !== "loaded");
+      return matchSearch && matchLoaded;
+    });
+    return (
+      <div className="mt-4 rounded-md border bg-muted/30 p-3">
+        <div className="mb-2 text-xs font-semibold">Global Default Assignment</div>
+        <div className="grid gap-2 md:grid-cols-4">
+          <Field label="Model id" placeholder="model-id" value={selectedModel} onChange={(value) => setSelectedModelsByProvider((current) => ({ ...current, [provider.id]: value }))} />
+          <Field label="Context" placeholder="8192" value={runtimeContextByProvider[provider.id] ?? String(provider.contextWindowTokens ?? 8192)} onChange={(value) => setRuntimeContextByProvider((current) => ({ ...current, [provider.id]: value }))} />
+          <Field label="Parallel slots" placeholder="1" value={runtimeParallelByProvider[provider.id] ?? "1"} onChange={(value) => setRuntimeParallelByProvider((current) => ({ ...current, [provider.id]: value }))} />
+          <div className="flex items-end gap-2">
+            {isLocalProvider(provider.kind) ? (
+              <>
+                <Button variant="outline" size="sm" onClick={() => void loadRuntimeModel(provider.id)}>
+                  Load model
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => void unloadRuntimeModel(provider.id)}>
+                  Unload
+                </Button>
+              </>
+            ) : (
+              <div className="text-xs text-muted-foreground">Cloud/API mode</div>
+            )}
+          </div>
+        </div>
+        <div className="mt-3 rounded border bg-background">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b bg-background p-2">
+            <label className="relative flex-1 text-xs">
+              <Search className="pointer-events-none absolute left-2 top-2.5 h-3 w-3 text-muted-foreground" />
+              <input
+                value={searchByProvider[provider.id] ?? ""}
+                onChange={(event) => setSearchByProvider((current) => ({ ...current, [provider.id]: event.target.value }))}
+                placeholder="Search models..."
+                className="h-8 w-full rounded-md border bg-background pl-7 pr-2 text-xs"
+              />
+            </label>
+            <select
+              value={loadedFilter}
+              onChange={(event) => setLoadedFilterByProvider((current) => ({ ...current, [provider.id]: event.target.value as "all" | "loaded" | "unloaded" }))}
+              className="h-8 rounded-md border bg-background px-2 text-xs"
+            >
+              <option value="all">All</option>
+              <option value="loaded">Loaded</option>
+              <option value="unloaded">Unloaded</option>
+            </select>
+          </div>
+          <div className="max-h-[22rem] overflow-y-auto p-2">
+            {filteredProfiles.length === 0 ? (
+              <div className="p-3 text-xs text-muted-foreground">No models match current filters.</div>
+            ) : (
+              <div className="grid gap-2">
+                {filteredProfiles.map((profile) => {
+                  const selected = selectedModel === profile.modelId;
+                  const loaded = profile.runtimeStatus === "loaded";
+                  return (
+                    <button
+                      key={`${provider.id}-${profile.modelId}`}
+                      type="button"
+                      onClick={() => selectModel(provider, profile)}
+                      className={`rounded border p-2 text-left text-xs transition ${selected ? "border-primary bg-primary/5" : "hover:bg-muted/60"}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium">{profile.displayName ?? profile.modelId}</div>
+                        <Badge variant={loaded ? "success" : "muted"}>{loaded ? "loaded" : "unloaded"}</Badge>
+                      </div>
+                      <div className="mt-1 text-muted-foreground">
+                        ctx {profile.contextWindowTokens} | out {profile.maxOutputTokens} | {profile.providerType}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <Badge variant="muted">{profile.compactModeRequired ? "compact" : profile.contextWindowTokens >= 32000 ? "heavy workflow" : "balanced"}</Badge>
+                        {profile.recommendedForCode ? <Badge variant="muted">coding</Badge> : null}
+                        {profile.recommendedForChat ? <Badge variant="muted">chat</Badge> : null}
+                        {profile.supportsEmbeddings ? <Badge variant="muted">embedding</Badge> : null}
+                        {profile.notes?.toLowerCase().includes("q4") ? <Badge variant="muted">quantized</Badge> : null}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderAdvancedOverrides(provider: LlmProviderSummary): JSX.Element {
+    const overrides = resolveOverrides(provider);
+    return (
+      <details className="mt-3 rounded-md border bg-background p-3">
+        <summary className="cursor-pointer text-xs font-semibold">Advanced Per-Agent Overrides</summary>
+        <div className="mt-3 space-y-2">
+          {AGENTS.map((agent) => {
+            const override = overrides[agent] ?? { use_default: true };
+            return (
+              <div key={`${provider.id}-${agent}`} className="grid gap-2 rounded border p-2 md:grid-cols-8">
+                <div className="text-xs font-medium">{agentLabels[agent]}</div>
+                <label className="flex items-center gap-1 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={override.use_default}
+                    onChange={(event) =>
+                      setAgentOverridesByProvider((current) => ({
+                        ...current,
+                        [provider.id]: {
+                          ...overrides,
+                          [agent]: { ...override, use_default: event.target.checked },
+                        },
+                      }))
+                    }
+                  />
+                  Use default
+                </label>
+                <input
+                  disabled={override.use_default}
+                  value={override.model ?? ""}
+                  onChange={(event) =>
+                    setAgentOverridesByProvider((current) => ({
+                      ...current,
+                      [provider.id]: {
+                        ...overrides,
+                        [agent]: { ...override, model: event.target.value },
+                      },
+                    }))
+                  }
+                  placeholder="model"
+                  className="h-8 rounded border px-2 text-xs disabled:opacity-50"
+                />
+                <input
+                  disabled={override.use_default}
+                  value={String(override.context_window_tokens ?? "")}
+                  onChange={(event) =>
+                    setAgentOverridesByProvider((current) => ({
+                      ...current,
+                      [provider.id]: {
+                        ...overrides,
+                        [agent]: { ...override, context_window_tokens: parseInt(event.target.value || "0", 10) || undefined },
+                      },
+                    }))
+                  }
+                  placeholder="ctx"
+                  className="h-8 rounded border px-2 text-xs disabled:opacity-50"
+                />
+                <input
+                  disabled={override.use_default}
+                  value={String(override.max_output_tokens ?? "")}
+                  onChange={(event) =>
+                    setAgentOverridesByProvider((current) => ({
+                      ...current,
+                      [provider.id]: {
+                        ...overrides,
+                        [agent]: { ...override, max_output_tokens: parseInt(event.target.value || "0", 10) || undefined },
+                      },
+                    }))
+                  }
+                  placeholder="max out"
+                  className="h-8 rounded border px-2 text-xs disabled:opacity-50"
+                />
+                <select
+                  disabled={override.use_default}
+                  value={override.parser_strategy ?? "json"}
+                  onChange={(event) =>
+                    setAgentOverridesByProvider((current) => ({
+                      ...current,
+                      [provider.id]: {
+                        ...overrides,
+                        [agent]: { ...override, parser_strategy: event.target.value },
+                      },
+                    }))
+                  }
+                  className="h-8 rounded border px-2 text-xs disabled:opacity-50"
+                >
+                  <option value="json">json</option>
+                  <option value="markdown_sections">markdown_sections</option>
+                  <option value="yaml">yaml</option>
+                  <option value="relaxed_json">relaxed_json</option>
+                </select>
+                <label className="flex items-center gap-1 text-xs">
+                  <input
+                    type="checkbox"
+                    disabled={override.use_default}
+                    checked={Boolean(override.compact_mode_enabled)}
+                    onChange={(event) =>
+                      setAgentOverridesByProvider((current) => ({
+                        ...current,
+                        [provider.id]: {
+                          ...overrides,
+                          [agent]: { ...override, compact_mode_enabled: event.target.checked },
+                        },
+                      }))
+                    }
+                  />
+                  Compact
+                </label>
+                <label className="flex items-center gap-1 text-xs">
+                  <input
+                    type="checkbox"
+                    disabled={override.use_default}
+                    checked={Boolean(override.streaming_enabled)}
+                    onChange={(event) =>
+                      setAgentOverridesByProvider((current) => ({
+                        ...current,
+                        [provider.id]: {
+                          ...overrides,
+                          [agent]: { ...override, streaming_enabled: event.target.checked },
+                        },
+                      }))
+                    }
+                  />
+                  Stream
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      </details>
+    );
+  }
+
+  function resolveOverrides(provider: LlmProviderSummary): Record<string, AgentOverride> {
+    const local = agentOverridesByProvider[provider.id];
+    if (local) return local;
+    const fromMetadata = provider.metadata?.agent_runtime_overrides;
+    if (fromMetadata && typeof fromMetadata === "object") return fromMetadata as Record<string, AgentOverride>;
+    return {};
+  }
+
+  function selectModel(provider: LlmProviderSummary, profile: LlmModelCapabilityProfile): void {
+    setSelectedModelsByProvider((current) => ({ ...current, [provider.id]: profile.modelId }));
+    setRuntimeContextByProvider((current) => ({ ...current, [provider.id]: String(profile.contextWindowTokens) }));
+    setRuntimeParallelByProvider((current) => ({ ...current, [provider.id]: profile.compactModeRequired ? "1" : current[provider.id] ?? "2" }));
+  }
+
   async function refreshProviders(): Promise<void> {
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
     if (!apiBaseUrl) return;
@@ -207,39 +450,120 @@ export function ProviderManagement({
   async function saveProvider(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-    if (!apiBaseUrl) {
-      setMessage("NEXT_PUBLIC_API_BASE_URL is not configured.");
-      return;
-    }
+    if (!apiBaseUrl) return;
     setSaving(true);
     setMessage(null);
     try {
       const response = await fetch(`${apiBaseUrl}/providers`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({
-            name,
-            kind,
-            base_url: baseUrl.trim() || null,
-            api_key: apiKey.trim() || null,
-            default_model: defaultModel,
-            status: "active",
-            is_default: isDefault,
-            context_window_tokens: parseInt(contextWindowTokens || "0", 10) || null,
-            reserved_output_tokens: parseInt(reservedOutputTokens || "0", 10) || null,
-            max_prompt_tokens: parseInt(maxPromptTokens || "0", 10) || null,
-          }),
+        body: JSON.stringify({
+          name,
+          kind,
+          base_url: baseUrl.trim() || null,
+          api_key: apiKey.trim() || null,
+          default_model: defaultModel,
+          status: "active",
+          is_default: isDefault,
+          context_window_tokens: parseInt(contextWindowTokens || "0", 10) || null,
+          reserved_output_tokens: parseInt(reservedOutputTokens || "0", 10) || null,
+          max_prompt_tokens: parseInt(maxPromptTokens || "0", 10) || null,
+        }),
       });
       if (!response.ok) throw new Error(await extractError(response));
       await refreshProviders();
-      setMessage("Provider saved and persisted.");
-      setApiKey("");
-      setIsDefault(false);
+      setMessage("Provider saved.");
     } catch (error) {
       setMessage(`Provider save failed: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setSaving(false);
     }
+  }
+
+  async function saveAgentAssignments(provider: LlmProviderSummary): Promise<void> {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) return;
+    try {
+      const selectedModel = selectedModelsByProvider[provider.id] ?? provider.defaultModel;
+      const contextWindow = parseInt(runtimeContextByProvider[provider.id] ?? String(provider.contextWindowTokens ?? 8192), 10) || 8192;
+      const parallelSlots = parseInt(runtimeParallelByProvider[provider.id] ?? "1", 10) || 1;
+      const overrides = resolveOverrides(provider);
+      const response = await fetch(`${apiBaseUrl}/providers/${provider.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          name: provider.name,
+          kind: provider.kind,
+          base_url: provider.baseUrl ?? null,
+          default_model: selectedModel,
+          status: provider.status,
+          context_window_tokens: contextWindow,
+          max_output_tokens: provider.maxOutputTokens ?? 1024,
+          reserved_output_tokens: provider.reservedOutputTokens ?? 1024,
+          max_prompt_tokens: provider.maxPromptTokens ?? null,
+          agent_models: {
+            ...provider.agentModels,
+            ...Object.fromEntries(
+              Object.entries(overrides)
+                .filter(([, value]) => value && value.use_default === false && value.model)
+                .map(([agent, value]) => [agent, value.model as string]),
+            ),
+          },
+          metadata: {
+            ...(provider.metadata ?? {}),
+            selected_model_id: selectedModel,
+            selected_context: contextWindow,
+            parallel_slots: parallelSlots,
+            compact_mode_enabled: contextWindow <= 8192,
+            agent_runtime_overrides: overrides,
+          },
+          is_default: provider.isDefault ?? false,
+        }),
+      });
+      if (!response.ok) throw new Error(await extractError(response));
+      await refreshProviders();
+      setMessage("Assignments saved and persisted.");
+    } catch (error) {
+      setMessage(`Assignment save failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+
+  async function loadRuntimeModel(providerId: string): Promise<void> {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) return;
+    const modelId = selectedModelsByProvider[providerId];
+    if (!modelId) return;
+    const contextLength = parseInt(runtimeContextByProvider[providerId] ?? "0", 10) || null;
+    const parallel = parseInt(runtimeParallelByProvider[providerId] ?? "1", 10) || 1;
+    const response = await fetch(`${apiBaseUrl}/providers/${providerId}/runtime-models/load`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ model_id: modelId, context_length: contextLength, parallel_slots: parallel }),
+    });
+    if (!response.ok) {
+      setMessage(`Load failed: ${await extractError(response)}`);
+      return;
+    }
+    await refreshProviders();
+    setMessage(`Loaded ${modelId}.`);
+  }
+
+  async function unloadRuntimeModel(providerId: string): Promise<void> {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!apiBaseUrl) return;
+    const modelId = selectedModelsByProvider[providerId];
+    if (!modelId) return;
+    const response = await fetch(`${apiBaseUrl}/providers/${providerId}/runtime-models/unload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ model_id: modelId }),
+    });
+    if (!response.ok) {
+      setMessage(`Unload failed: ${await extractError(response)}`);
+      return;
+    }
+    await refreshProviders();
+    setMessage(`Unloaded ${modelId}.`);
   }
 
   async function testConnection(): Promise<void> {
@@ -263,12 +587,8 @@ export function ProviderManagement({
         }),
       });
       if (!response.ok) throw new Error(await extractError(response));
-      const payload = (await response.json()) as { result: { status: string; latency_ms?: number; message: string; capabilities?: Record<string, unknown> } };
-      const latency = payload.result.latency_ms ? ` (${payload.result.latency_ms}ms)` : "";
-      const capabilities = payload.result.capabilities
-        ? ` | caps: ${Object.entries(payload.result.capabilities).filter(([, value]) => Boolean(value)).map(([key]) => key).join(", ")}`
-        : "";
-      setMessage(`Connection ${payload.result.status}${latency}: ${payload.result.message}${capabilities}`);
+      const payload = (await response.json()) as { result: { status: string; message: string } };
+      setMessage(`Connection ${payload.result.status}: ${payload.result.message}`);
     } catch (error) {
       setMessage(`Connection test failed: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
@@ -279,31 +599,26 @@ export function ProviderManagement({
   async function deleteProvider(providerId: string): Promise<void> {
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
     if (!apiBaseUrl) return;
-    try {
-      const response = await fetch(`${apiBaseUrl}/providers/${providerId}`, { method: "DELETE" });
-      if (!response.ok) throw new Error(await extractError(response));
-      await refreshProviders();
-      setMessage("Provider deleted.");
-    } catch (error) {
-      setMessage(`Provider delete failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    }
+    const response = await fetch(`${apiBaseUrl}/providers/${providerId}`, { method: "DELETE" });
+    if (!response.ok) return;
+    await refreshProviders();
   }
 
   async function refreshModels(providerId: string): Promise<void> {
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
     if (!apiBaseUrl) return;
-    try {
-      const response = await fetch(`${apiBaseUrl}/providers/${providerId}/models/refresh`, {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) throw new Error(await extractError(response));
-      await refreshProviders();
-      setMessage("Models refreshed.");
-    } catch (error) {
-      setMessage(`Model refresh failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    const response = await fetch(`${apiBaseUrl}/providers/${providerId}/models/refresh`, { method: "POST", headers: { Accept: "application/json" } });
+    if (!response.ok) {
+      setMessage(`Model refresh failed: ${await extractError(response)}`);
+      return;
     }
+    await refreshProviders();
+    setMessage("Models refreshed.");
   }
+}
+
+function isLocalProvider(kind: string): boolean {
+  return ["lm_studio", "local_lm_studio", "ollama", "local"].includes(kind);
 }
 
 async function extractError(response: Response): Promise<string> {
@@ -332,6 +647,7 @@ function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {
     configured: Boolean(item.configured),
     isDefault: Boolean(item.is_default ?? false),
     updatedAt: String(item.updated_at ?? ""),
+    metadata: (item.metadata ?? {}) as Record<string, unknown>,
     modelProfiles: normalizeModelProfiles(item.model_profiles),
   };
 }
@@ -360,6 +676,11 @@ function normalizeModelProfiles(value: unknown): Record<string, import("@/lib/ty
         compactModeRequired: Boolean(item.compact_mode_required ?? true),
         notes: item.notes ? String(item.notes) : undefined,
         detectionSource: String(item.detection_source ?? "estimated"),
+        loadedModelId: item.loaded_model_id ? String(item.loaded_model_id) : undefined,
+        localRuntimeManagedByPlatform: Boolean(item.local_runtime_managed_by_platform ?? false),
+        runtimeStatus: item.runtime_status ? String(item.runtime_status) : undefined,
+        lastLoadedAt: item.last_loaded_at ? String(item.last_loaded_at) : undefined,
+        lastHealthCheckAt: item.last_health_check_at ? String(item.last_health_check_at) : undefined,
         lastRefreshedAt: String(item.last_refreshed_at ?? ""),
       },
     ]),

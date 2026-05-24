@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from core.agents.model_clients import OpenAICompatibleChatModelClient
 from core.agents.runtime import AgentModelClient
+from core.agents.lmstudio_client import LMStudioClient
 from core.contracts.prompts import PromptMessage
 from core.persistence import PostgresJsonDocumentStore
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ class ProviderKind(StrEnum):
     OPENROUTER = "openrouter"
     OLLAMA = "ollama"
     LM_STUDIO = "lm_studio"
+    LOCAL_LM_STUDIO = "local_lm_studio"
     LOCAL = "local"
     CUSTOM = "custom"
 
@@ -55,6 +57,11 @@ class ModelCapabilityProfile(BaseModel):
     compact_mode_required: bool = True
     notes: str | None = None
     detection_source: str = "estimated"
+    loaded_model_id: str | None = None
+    local_runtime_managed_by_platform: bool = False
+    runtime_status: str = "unknown"
+    last_loaded_at: datetime | None = None
+    last_health_check_at: datetime | None = None
     last_refreshed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -84,6 +91,7 @@ class ProviderConfig(BaseModel):
         payload = self.model_dump(mode="json")
         payload["api_key"] = self.masked_api_key
         payload["configured"] = bool(self.api_key or self.kind in _LOCAL_PROVIDER_KINDS)
+        payload["runtime_mode"] = "local_controlled" if self.kind in _LOCAL_PROVIDER_KINDS else "cloud_api"
         return payload
 
     @property
@@ -217,7 +225,7 @@ class ProviderRegistry:
                 profile.compact_mode_required,
                 profile.detection_source,
             )
-        if local_lm_studio_safe_mode and provider.kind == ProviderKind.LM_STUDIO:
+        if local_lm_studio_safe_mode and provider.kind in {ProviderKind.LM_STUDIO, ProviderKind.LOCAL_LM_STUDIO}:
             timeout_seconds = max(float(timeout_seconds or 60), 180.0)
             safe_prompt_budget = {
                 "ba": 900,
@@ -320,7 +328,133 @@ class ProviderRegistry:
     async def discover_models(self, provider: ProviderConfig) -> tuple[ModelCapabilityProfile, ...]:
         if provider.kind == ProviderKind.OLLAMA:
             return await self._discover_ollama_models(provider)
+        if provider.kind in {ProviderKind.LM_STUDIO, ProviderKind.LOCAL_LM_STUDIO}:
+            return await self._discover_lm_studio_models(provider)
         return await self._discover_openai_compatible_models(provider)
+
+    async def lmstudio_list_runtime_models(self, provider_id: UUID) -> dict[str, Any]:
+        provider = await self.get(provider_id)
+        if provider is None:
+            raise ValueError(f"Configured provider was not found: {provider_id}")
+        self._require_local_runtime_provider(provider)
+        client = self._lmstudio_client(provider)
+        available = client.list_models()
+        loaded = client.list_loaded_models()
+        return {"available": available, "loaded": loaded}
+
+    async def lmstudio_load_model(
+        self,
+        provider_id: UUID,
+        *,
+        model_id: str,
+        context_length: int | None = None,
+        max_output_tokens: int | None = None,
+        parallel_slots: int | None = None,
+        gpu_offload: int | None = None,
+        temperature: float | None = None,
+        streaming_enabled: bool | None = None,
+    ) -> ModelCapabilityProfile:
+        provider = await self.get(provider_id)
+        if provider is None:
+            raise ValueError(f"Configured provider was not found: {provider_id}")
+        self._require_local_runtime_provider(provider)
+        client = self._lmstudio_client(provider)
+        client.load_model(
+            model_id,
+            context_length=context_length,
+            max_output_tokens=max_output_tokens,
+            parallel_slots=parallel_slots,
+            gpu_offload=gpu_offload,
+            temperature=temperature,
+            streaming_enabled=streaming_enabled,
+        )
+        loaded_at = datetime.now(timezone.utc)
+        context_window = int(context_length or provider.context_window_tokens or 4096)
+        output_max = int(max_output_tokens or provider.max_output_tokens or provider.reserved_output_tokens or 1024)
+        max_input = max(256, context_window - output_max - 300)
+        current = provider.model_profiles.get(model_id) or _default_model_profile(provider, model_id, detection_source="manual")
+        updated_profile = current.model_copy(
+            update={
+                "provider_id": provider.id,
+                "provider_type": provider.kind.value,
+                "model_id": model_id,
+                "loaded_model_id": model_id,
+                "context_window_tokens": context_window,
+                "max_input_tokens": max_input,
+                "max_output_tokens": output_max,
+                "supports_streaming": bool(streaming_enabled if streaming_enabled is not None else current.supports_streaming),
+                "local_runtime_managed_by_platform": True,
+                "runtime_status": "loaded",
+                "last_loaded_at": loaded_at,
+                "last_health_check_at": loaded_at,
+                "detection_source": "runtime_loaded",
+                "compact_mode_required": context_window <= 8192,
+            }
+        )
+        profiles = dict(provider.model_profiles)
+        profiles[model_id] = updated_profile
+        merged_metadata = {
+            **provider.metadata,
+            "lmstudio_runtime": {
+                "last_loaded_model": model_id,
+                "context_length": context_window,
+                "max_output_tokens": output_max,
+                "parallel_slots": parallel_slots,
+                "gpu_offload": gpu_offload,
+                "temperature": temperature,
+                "streaming_enabled": streaming_enabled,
+            },
+        }
+        await self.upsert(
+            provider.model_copy(
+                update={
+                    "default_model": model_id,
+                    "context_window_tokens": context_window,
+                    "max_output_tokens": output_max,
+                    "model_profiles": profiles,
+                    "metadata": merged_metadata,
+                }
+            )
+        )
+        return updated_profile
+
+    async def lmstudio_unload_model(self, provider_id: UUID, *, model_id: str) -> ModelCapabilityProfile:
+        provider = await self.get(provider_id)
+        if provider is None:
+            raise ValueError(f"Configured provider was not found: {provider_id}")
+        self._require_local_runtime_provider(provider)
+        client = self._lmstudio_client(provider)
+        client.unload_model(model_id)
+        current = provider.model_profiles.get(model_id) or _default_model_profile(provider, model_id, detection_source="manual")
+        updated = current.model_copy(
+            update={
+                "runtime_status": "unloaded",
+                "loaded_model_id": None,
+                "local_runtime_managed_by_platform": True,
+                "last_health_check_at": datetime.now(timezone.utc),
+                "detection_source": "runtime_unloaded",
+            }
+        )
+        profiles = dict(provider.model_profiles)
+        profiles[model_id] = updated
+        await self.upsert(provider.model_copy(update={"model_profiles": profiles}))
+        return updated
+
+    async def lmstudio_download_model(self, provider_id: UUID, *, model_id: str) -> dict[str, Any]:
+        provider = await self.get(provider_id)
+        if provider is None:
+            raise ValueError(f"Configured provider was not found: {provider_id}")
+        self._require_local_runtime_provider(provider)
+        client = self._lmstudio_client(provider)
+        return client.download_model(model_id)
+
+    async def lmstudio_download_status(self, provider_id: UUID, *, download_id: str | None = None, model: str | None = None) -> dict[str, Any]:
+        provider = await self.get(provider_id)
+        if provider is None:
+            raise ValueError(f"Configured provider was not found: {provider_id}")
+        self._require_local_runtime_provider(provider)
+        client = self._lmstudio_client(provider)
+        return client.download_status(download_id=download_id, model=model)
 
     async def refresh_models(self, provider_id: UUID) -> tuple[ModelCapabilityProfile, ...]:
         provider = await self.get(provider_id)
@@ -399,6 +533,64 @@ class ProviderRegistry:
             profiles.append(_default_model_profile(provider, provider.default_model, detection_source="fallback"))
         return tuple(profiles)
 
+    async def _discover_lm_studio_models(self, provider: ProviderConfig) -> tuple[ModelCapabilityProfile, ...]:
+        client = self._lmstudio_client(provider)
+        payload = client.list_models()
+        loaded_payload = client.list_loaded_models()
+        loaded_ids: set[str] = set()
+        for key in ("data", "models", "loaded"):
+            rows = loaded_payload.get(key, []) if isinstance(loaded_payload, dict) else []
+            if isinstance(rows, list):
+                for item in rows:
+                    if isinstance(item, dict):
+                        mid = str(item.get("id") or item.get("model") or item.get("identifier") or "").strip()
+                        if mid:
+                            loaded_ids.add(mid)
+        data = payload.get("data", []) if isinstance(payload, dict) else []
+        profiles: list[ModelCapabilityProfile] = []
+        if isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                model_id = str(item.get("id", "")).strip()
+                if not model_id:
+                    continue
+                profile = _default_model_profile(provider, model_id, detection_source="discovered")
+                context_window = int(item.get("context_length") or item.get("n_ctx") or provider.context_window_tokens or profile.context_window_tokens)
+                profile = profile.model_copy(
+                    update={
+                        "display_name": str(item.get("display_name") or item.get("name") or model_id),
+                        "context_window_tokens": context_window,
+                        "max_input_tokens": max(256, context_window - int(profile.max_output_tokens) - 300),
+                        "loaded_model_id": model_id if model_id in loaded_ids else None,
+                        "runtime_status": "loaded" if model_id in loaded_ids else "unloaded",
+                        "local_runtime_managed_by_platform": True,
+                        "last_health_check_at": datetime.now(timezone.utc),
+                        "compact_mode_required": context_window <= 8192,
+                    }
+                )
+                profiles.append(profile)
+        if not profiles and provider.default_model:
+            profiles.append(_default_model_profile(provider, provider.default_model, detection_source="fallback"))
+        return tuple(profiles)
+
+    def _lmstudio_client(self, provider: ProviderConfig) -> LMStudioClient:
+        if not provider.base_url:
+            raise ValueError("LM Studio base URL is required.")
+        base = provider.base_url.rstrip("/")
+        if base.endswith("/v1"):
+            base = base[: -len("/v1")]
+        return LMStudioClient(
+            base_url=base,
+            api_key=provider.api_key,
+            timeout_seconds=provider.timeout_seconds,
+            headers=provider.headers,
+        )
+
+    def _require_local_runtime_provider(self, provider: ProviderConfig) -> None:
+        if provider.kind not in {ProviderKind.LM_STUDIO, ProviderKind.LOCAL_LM_STUDIO}:
+            raise ValueError("Model lifecycle management is available only for local LM Studio providers.")
+
 
 class RoutingModelClient(AgentModelClient):
     """Model client that routes each agent to the configured provider/model."""
@@ -445,7 +637,7 @@ class RoutingModelClient(AgentModelClient):
         )
 
 
-_LOCAL_PROVIDER_KINDS = {ProviderKind.OLLAMA, ProviderKind.LM_STUDIO, ProviderKind.LOCAL}
+_LOCAL_PROVIDER_KINDS = {ProviderKind.OLLAMA, ProviderKind.LM_STUDIO, ProviderKind.LOCAL_LM_STUDIO, ProviderKind.LOCAL}
 
 
 def _provider_health(provider: ProviderConfig) -> ProviderHealth:
@@ -455,7 +647,7 @@ def _provider_health(provider: ProviderConfig) -> ProviderHealth:
         return ProviderHealth(provider_id=provider.id, status="failed", message="Default model is required.")
     if provider.kind not in _LOCAL_PROVIDER_KINDS and not provider.api_key:
         return ProviderHealth(provider_id=provider.id, status="warning", message="API key is not configured.")
-    if provider.kind in {ProviderKind.CUSTOM, ProviderKind.CURSOR, ProviderKind.OPENROUTER, ProviderKind.OLLAMA, ProviderKind.LM_STUDIO, ProviderKind.LOCAL} and not provider.base_url:
+    if provider.kind in {ProviderKind.CUSTOM, ProviderKind.CURSOR, ProviderKind.OPENROUTER, ProviderKind.OLLAMA, ProviderKind.LM_STUDIO, ProviderKind.LOCAL_LM_STUDIO, ProviderKind.LOCAL} and not provider.base_url:
         return ProviderHealth(provider_id=provider.id, status="warning", message="Base URL is not configured.")
     return ProviderHealth(provider_id=provider.id, status="ok", message="Provider configuration is ready.")
 
@@ -549,7 +741,7 @@ def _stable_provider_id(name: str) -> UUID:
 def _connectivity_url(provider: ProviderConfig) -> str:
     if provider.kind == ProviderKind.OPENAI:
         base = provider.base_url or "https://api.openai.com/v1"
-    elif provider.kind in {ProviderKind.OLLAMA, ProviderKind.LM_STUDIO, ProviderKind.CUSTOM, ProviderKind.OPENROUTER, ProviderKind.CURSOR, ProviderKind.LOCAL}:
+    elif provider.kind in {ProviderKind.OLLAMA, ProviderKind.LM_STUDIO, ProviderKind.LOCAL_LM_STUDIO, ProviderKind.CUSTOM, ProviderKind.OPENROUTER, ProviderKind.CURSOR, ProviderKind.LOCAL}:
         base = provider.base_url or ""
     else:
         base = provider.base_url or ""

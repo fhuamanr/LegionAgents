@@ -9,6 +9,12 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from app.schemas import (
+    AgentPlaygroundArtifactListResponse,
+    AgentPlaygroundArtifactSummary,
+    AgentPlaygroundHandoffUpdateRequest,
+    AgentPlaygroundRunRequest,
+    AgentPlaygroundRunResponse,
+    AgentPlaygroundWorkflowRunRequest,
     ExecutionLogResponse,
     ExecutionStatusResponse,
     ReportResponse,
@@ -37,6 +43,10 @@ from core.streaming import (
     StructuredExecutionLogger,
     TimelineGenerator,
 )
+from core.contracts.artifacts import Artifact, ArtifactKind
+from core.contracts.execution import AgentExecutionRequest
+from core.graph.runtime_agents import build_default_agent_runtimes
+from core.runtime.context_governor import ContextGovernor
 from core.graph import (
     InMemoryWorkflowExecutionRepository,
     LangGraphExecutionRuntime,
@@ -85,6 +95,8 @@ class ExecutionService:
         self._ingestion = StoryIngestionPipeline()
         self._upload_root = Path(os.getenv("UPLOAD_ROOT", "outputs/uploads")).resolve()
         self._local_safe_mode_semaphore = asyncio.Semaphore(1)
+        self._playground_artifacts: dict[UUID, list[AgentPlaygroundArtifactSummary]] = {}
+        self._context_governor = ContextGovernor()
 
     async def upload_user_story(self, request: UserStoryUploadRequest) -> UploadResponse:
         upload = StoredUpload(
@@ -137,6 +149,13 @@ class ExecutionService:
         request = await self._hydrate_upload_context(request)
         workflow = await self._initialize_workflow(request)
         return await self._execute_workflow(workflow.workflow_id, request)
+
+    async def trigger_workflow_with_toggles(self, request: AgentPlaygroundWorkflowRunRequest) -> WorkflowResponse:
+        metadata = dict(request.metadata)
+        metadata["enabled_agents"] = list(request.enabled_agents)
+        metadata["execution_mode"] = request.execution_mode
+        trigger = TriggerWorkflowRequest(task=request.task, metadata=metadata)
+        return await self.trigger_workflow(trigger)
 
     async def trigger_workflow_live(self, request: TriggerWorkflowRequest) -> WorkflowResponse:
         """Start a workflow and return immediately for WebSocket subscribers."""
@@ -245,6 +264,164 @@ class ExecutionService:
             )
         )
         return final_workflow
+
+    async def run_agent_playground(self, request: AgentPlaygroundRunRequest) -> AgentPlaygroundRunResponse:
+        workflow_id = request.workflow_id or uuid4()
+        execution_id = uuid4()
+        source_text, warnings = await self._resolve_playground_input(request, workflow_id)
+        if request.local_lm_studio_safe_mode:
+            budget = self._context_governor.budget_for(request.agent_name, local_compact_mode=True)
+            estimated = self._context_governor.estimate_tokens(source_text)
+            if estimated > budget.prompt_max_tokens:
+                raise ValueError(
+                    f"Prompt exceeds local budget for {request.agent_name}. estimated={estimated} budget={budget.prompt_max_tokens}. "
+                    "Trim input or use compact mode."
+                )
+        metadata = {
+            **request.metadata,
+            "provider_id": request.provider_id,
+            "model": request.model,
+            "local_lm_studio_safe_mode": request.local_lm_studio_safe_mode,
+            "compact_mode_enabled": request.compact_mode_enabled,
+            "workflow_mode": "ba_only" if request.agent_name == "ba" else "manual_step",
+            "execution_mode": "manual_step",
+        }
+        step_request = AgentExecutionRequest(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            agent_name=request.agent_name,
+            task=source_text,
+            upstream_artifacts=tuple(self._artifacts_as_upstream(workflow_id, request.previous_agent)),
+            metadata=metadata,
+        )
+        runtimes = build_default_agent_runtimes(model_client=self._model_client)
+        runtime = runtimes[request.agent_name]
+        result = await runtime.execute(step_request)
+        raw_output = self._extract_raw_output(result)
+        structured = result.metadata.get("structured_output", {}) if isinstance(result.metadata, dict) else {}
+        handoff = self._derive_handoff(result, structured)
+        token_report = {
+            "input_tokens": int(result.metadata.get("observability", {}).get("prompt_token_estimate", 0)) if isinstance(result.metadata, dict) else 0,
+            "output_tokens": int(result.metadata.get("observability", {}).get("output_token_estimate", 0)) if isinstance(result.metadata, dict) else 0,
+            "handoff_tokens": max(1, len(handoff) // 4),
+            "duration_seconds": result.metadata.get("observability", {}).get("generation_duration_seconds") if isinstance(result.metadata, dict) else None,
+            "provider_id": request.provider_id,
+            "model_id": request.model,
+            "validation": result.metadata.get("validation", {}) if isinstance(result.metadata, dict) else {},
+        }
+        artifact = AgentPlaygroundArtifactSummary(
+            id=f"{workflow_id}:{execution_id}:{request.agent_name}",
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            agent_name=request.agent_name,
+            provider_id=request.provider_id,
+            model_id=request.model,
+            raw_output=raw_output,
+            structured_output=structured if isinstance(structured, dict) else {},
+            handoff=handoff,
+            execution_log="\n".join(result.errors) if result.errors else f"{request.agent_name} completed",
+            token_report=token_report,
+            created_at=datetime.now(timezone.utc),
+        )
+        self._playground_artifacts.setdefault(workflow_id, []).append(artifact)
+        await self._persist_playground_artifact(artifact)
+        return AgentPlaygroundRunResponse(artifact=artifact, warnings=tuple(warnings))
+
+    async def list_agent_playground_artifacts(self, workflow_id: UUID) -> AgentPlaygroundArtifactListResponse:
+        artifacts = list(self._playground_artifacts.get(workflow_id, []))
+        if not artifacts and self._state_store is not None:
+            loaded = await self._load_playground_artifacts(workflow_id)
+            self._playground_artifacts[workflow_id] = loaded
+            artifacts = list(loaded)
+        return AgentPlaygroundArtifactListResponse(artifacts=tuple(artifacts))
+
+    async def update_playground_handoff(self, workflow_id: UUID, execution_id: UUID, request: AgentPlaygroundHandoffUpdateRequest) -> AgentPlaygroundArtifactSummary:
+        artifacts = self._playground_artifacts.get(workflow_id, [])
+        for index, artifact in enumerate(artifacts):
+            if artifact.execution_id == execution_id:
+                updated = artifact.model_copy(update={"handoff": request.handoff})
+                artifacts[index] = updated
+                await self._persist_playground_artifact(updated)
+                return updated
+        raise KeyError(str(execution_id))
+
+    def _artifacts_as_upstream(self, workflow_id: UUID, previous_agent: str | None) -> tuple[Artifact, ...]:
+        artifacts = self._playground_artifacts.get(workflow_id, [])
+        selected = [item for item in artifacts if previous_agent is None or item.agent_name == previous_agent]
+        if not selected:
+            return tuple()
+        latest = selected[-1]
+        return (
+            Artifact(
+                id=f"playground-handoff-{latest.execution_id}",
+                kind=ArtifactKind.GENERIC,
+                name=f"{latest.agent_name} handoff",
+                producer_agent=latest.agent_name,
+                content=latest.handoff,
+                metadata={"source": "playground_handoff"},
+            ),
+        )
+
+    async def _resolve_playground_input(self, request: AgentPlaygroundRunRequest, workflow_id: UUID) -> tuple[str, list[str]]:
+        warnings: list[str] = []
+        if request.input_source == "manual_prompt":
+            return request.prompt.strip(), warnings
+        if request.input_source == "uploaded_file":
+            return (request.uploaded_text or "").strip(), warnings
+        artifacts = self._playground_artifacts.get(workflow_id, [])
+        if request.input_source == "previous_agent_raw_output":
+            candidates = [item for item in artifacts if request.previous_agent is None or item.agent_name == request.previous_agent]
+            if candidates:
+                return candidates[-1].raw_output, warnings
+            warnings.append("No previous raw output found; using manual prompt.")
+            return request.prompt.strip(), warnings
+        if request.input_source == "previous_agent_handoff":
+            candidates = [item for item in artifacts if request.previous_agent is None or item.agent_name == request.previous_agent]
+            if candidates:
+                return candidates[-1].handoff, warnings
+            warnings.append("No previous handoff found; using manual prompt.")
+            return request.prompt.strip(), warnings
+        if request.input_source == "saved_artifact" and request.artifact_id:
+            for item in artifacts:
+                if item.id == request.artifact_id:
+                    return item.handoff or item.raw_output, warnings
+            warnings.append("Saved artifact not found; using manual prompt.")
+        return request.prompt.strip(), warnings
+
+    def _extract_raw_output(self, result) -> str:
+        if not result.artifacts:
+            return result.summary
+        return str(result.artifacts[0].content or result.summary)
+
+    def _derive_handoff(self, result, structured: dict[str, Any]) -> str:
+        handoff = ""
+        if isinstance(result.metadata, dict):
+            handoff = str(result.metadata.get("handoff_summary", "")).strip()
+        if handoff:
+            return handoff
+        if structured:
+            summary = str(structured.get("summary", "")).strip()
+            if summary:
+                return summary[:1200]
+        return result.summary[:1200]
+
+    async def _persist_playground_artifact(self, artifact: AgentPlaygroundArtifactSummary) -> None:
+        if self._state_store is None:
+            return
+        await self._state_store.upsert(
+            bucket="agent_playground_artifacts",
+            document_id=artifact.execution_id,
+            key=f"{artifact.workflow_id}:{artifact.agent_name}:{artifact.created_at.isoformat()}",
+            payload=artifact.model_dump(mode="json"),
+        )
+
+    async def _load_playground_artifacts(self, workflow_id: UUID) -> list[AgentPlaygroundArtifactSummary]:
+        if self._state_store is None:
+            return []
+        loaded: list[AgentPlaygroundArtifactSummary] = []
+        for payload in await self._state_store.list(bucket="agent_playground_artifacts", key_prefix=f"{workflow_id}:"):
+            loaded.append(AgentPlaygroundArtifactSummary.model_validate(payload))
+        return loaded
 
     async def recover_workflow(
         self,
@@ -434,6 +611,37 @@ class ExecutionService:
     ):
         async def emit_runtime_event(event_name: str, state: dict[str, Any]) -> None:
             agent_name = str(state.get("next_agent") or state.get("last_agent") or "")
+            if event_name in {
+                "context_budget_estimated",
+                "context_compressed",
+                "handoff_generated",
+                "oversized_prompt_blocked",
+                "compact_mode_enabled",
+                "stage_transition",
+                "provider_selected_per_agent",
+            }:
+                payload = self._runtime_event_payload(state, agent_name)
+                payload["event"] = event_name
+                event = await self.emitter.emit(
+                    ExecutionEventType.TELEMETRY_RECORDED,
+                    workflow_id=workflow_id,
+                    execution_id=state.get("execution_id"),
+                    thread_id=thread_id,
+                    agent_name=agent_name or None,
+                    message=event_name,
+                    payload=payload,
+                )
+                await self.logger.log(
+                    ExecutionLogLevel.INFO,
+                    event_name,
+                    workflow_id=workflow_id,
+                    execution_id=state.get("execution_id"),
+                    agent_name=agent_name or None,
+                    payload=payload,
+                )
+                if progress_hook is not None:
+                    await progress_hook(event)
+                return
             event_type = self._runtime_event_type(event_name, agent_name)
             payload = self._runtime_event_payload(state, agent_name)
             event = await self.emitter.emit(

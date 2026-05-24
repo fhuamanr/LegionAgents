@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from uuid import UUID, uuid4
 
-from app.schemas import ProviderConnectivityApiRequest, ProviderConnectivityResponse, ProviderHealthResponse, ProviderListResponse, ProviderModelProfilesResponse, ProviderResponse, ProviderUpsertApiRequest
+from app.schemas import LMStudioLoadModelRequest, ProviderConnectivityApiRequest, ProviderConnectivityResponse, ProviderHealthResponse, ProviderListResponse, ProviderModelAssignRequest, ProviderModelProfilesResponse, ProviderResponse, ProviderUpsertApiRequest, ProviderWorkflowPreflightRequest, ProviderWorkflowPreflightResponse
 from core.agents.providers import ProviderConfig, ProviderKind, ProviderRegistry, ProviderStatus
 
 
@@ -13,6 +14,7 @@ class ProviderApplicationService:
 
     def __init__(self, registry: ProviderRegistry) -> None:
         self._registry = registry
+        self._local_model_management_enabled = os.getenv("ENABLE_LOCAL_MODEL_MANAGEMENT", "").strip().lower() in {"1", "true", "yes", "on"}
 
     @property
     def registry(self) -> ProviderRegistry:
@@ -110,3 +112,84 @@ class ProviderApplicationService:
         return ProviderModelProfilesResponse(
             models=tuple(item.model_dump(mode="json") for item in provider.model_profiles.values())
         )
+
+    def assert_local_model_management_enabled(self) -> None:
+        if not self._local_model_management_enabled:
+            raise ValueError("Local model management is disabled. Set ENABLE_LOCAL_MODEL_MANAGEMENT=true for trusted deployments.")
+
+    async def assign_agent_model(
+        self,
+        provider_id: UUID,
+        *,
+        agent_name: str,
+        request: ProviderModelAssignRequest,
+    ) -> ProviderResponse:
+        provider = await self._registry.get(provider_id)
+        if provider is None:
+            raise KeyError(str(provider_id))
+        agent_models = dict(provider.agent_models)
+        agent_models[agent_name] = request.model_id
+        saved = await self._registry.upsert(provider.model_copy(update={"agent_models": agent_models}))
+        return ProviderResponse(provider=saved.public_dict())
+
+    async def lmstudio_runtime_models(self, provider_id: UUID) -> dict[str, object]:
+        self.assert_local_model_management_enabled()
+        return await self._registry.lmstudio_list_runtime_models(provider_id)
+
+    async def lmstudio_load_model(self, provider_id: UUID, request: LMStudioLoadModelRequest) -> ProviderModelProfilesResponse:
+        self.assert_local_model_management_enabled()
+        await self._registry.lmstudio_load_model(
+            provider_id,
+            model_id=request.model_id,
+            context_length=request.context_length,
+            max_output_tokens=request.max_output_tokens,
+            parallel_slots=request.parallel_slots,
+            gpu_offload=request.gpu_offload,
+            temperature=request.temperature,
+            streaming_enabled=request.streaming_enabled,
+        )
+        provider = await self._registry.get(provider_id)
+        if provider is None:
+            raise KeyError(str(provider_id))
+        return ProviderModelProfilesResponse(models=tuple(item.model_dump(mode="json") for item in provider.model_profiles.values()))
+
+    async def lmstudio_unload_model(self, provider_id: UUID, *, model_id: str) -> ProviderModelProfilesResponse:
+        self.assert_local_model_management_enabled()
+        await self._registry.lmstudio_unload_model(provider_id, model_id=model_id)
+        provider = await self._registry.get(provider_id)
+        if provider is None:
+            raise KeyError(str(provider_id))
+        return ProviderModelProfilesResponse(models=tuple(item.model_dump(mode="json") for item in provider.model_profiles.values()))
+
+    async def lmstudio_download_model(self, provider_id: UUID, *, model_id: str) -> ProviderConnectivityResponse:
+        self.assert_local_model_management_enabled()
+        result = await self._registry.lmstudio_download_model(provider_id, model_id=model_id)
+        return ProviderConnectivityResponse(result=result)
+
+    async def lmstudio_download_status(self, provider_id: UUID, *, download_id: str | None = None, model: str | None = None) -> ProviderConnectivityResponse:
+        self.assert_local_model_management_enabled()
+        result = await self._registry.lmstudio_download_status(provider_id, download_id=download_id, model=model)
+        return ProviderConnectivityResponse(result=result)
+
+    async def preflight(self, provider_id: UUID, request: ProviderWorkflowPreflightRequest) -> ProviderWorkflowPreflightResponse:
+        provider = await self._registry.get(provider_id)
+        if provider is None:
+            raise KeyError(str(provider_id))
+        warnings: list[str] = []
+        recommendations: list[str] = []
+        required_agents = tuple(request.required_agents) or ("ba", "architect")
+        for agent in required_agents:
+            model_id = provider.agent_models.get(agent, provider.default_model)
+            profile = provider.model_profiles.get(model_id)
+            if profile is None:
+                warnings.append(f"{agent}: model profile not found for '{model_id}'.")
+                recommendations.append(f"Refresh models and assign a discovered model to {agent}.")
+                continue
+            if provider.kind in {ProviderKind.LM_STUDIO, ProviderKind.LOCAL_LM_STUDIO} and profile.runtime_status != "loaded":
+                warnings.append(f"{agent}: model '{model_id}' is not loaded.")
+                recommendations.append(f"Load '{model_id}' before starting workflow.")
+            if profile.context_window_tokens <= 4096:
+                warnings.append(f"{agent}: context window is {profile.context_window_tokens}, local compact mode is recommended.")
+                recommendations.append("Use BA-only or BA+Architect mode, or increase context to 8192 if stable.")
+        ok = len(warnings) == 0
+        return ProviderWorkflowPreflightResponse(ok=ok, warnings=tuple(warnings), recommendations=tuple(recommendations))

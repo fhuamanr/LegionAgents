@@ -23,6 +23,8 @@ from core.graph.persistence import (
     WorkflowRunStatus,
 )
 from core.graph.runtime_agents import build_default_agent_runtimes
+from core.runtime.agent_profiles import AgentRuntimeProfileRepository
+from core.runtime.context_governor import ContextGovernor
 
 
 DEFAULT_DELIVERY_SEQUENCE: tuple[str, ...] = ("ba", "architect", "developer", "qa", "docs", "pr")
@@ -63,6 +65,7 @@ class LangGraphExecutionRuntime:
         token_callback: Callable[[UUID, UUID, str, str], Awaitable[None]] | None = None,
         compiled_graph: CompiledStateGraph | None = None,
         execution_owner: str = "backend",
+        profile_repository: AgentRuntimeProfileRepository | None = None,
     ) -> None:
         self._agent_runtimes = agent_runtimes or build_default_agent_runtimes(
             project_root=project_root,
@@ -75,6 +78,8 @@ class LangGraphExecutionRuntime:
         self._token_callback = token_callback
         self._compiled_graph = compiled_graph
         self._execution_owner = execution_owner
+        self._profiles = profile_repository or AgentRuntimeProfileRepository()
+        self._context_governor = ContextGovernor()
 
     @property
     def repository(self) -> WorkflowExecutionRepository:
@@ -233,7 +238,7 @@ class LangGraphExecutionRuntime:
             workflow_id=workflow_state.workflow_id,
             agent_name=agent_name,
             task=workflow_state.task,
-            upstream_artifacts=workflow_state.artifacts,
+            upstream_artifacts=tuple(),
             metadata={
                 **state.get("metadata", {}),
                 **({"token_callback": self._token_callback} if self._token_callback is not None else {}),
@@ -242,7 +247,66 @@ class LangGraphExecutionRuntime:
                 "execution_owner": self._execution_owner,
             },
         )
+        profile = await self._profiles.get(agent_name)
+        local_compact_mode = bool(request.metadata.get("local_lm_studio_safe_mode", False))
+        compact_artifacts = self._context_governor.compact_artifacts_for_handoff(
+            workflow_state.artifacts,
+            max_items=3 if local_compact_mode else 6,
+            max_chars_each=280 if local_compact_mode else 640,
+        )
+        request = request.model_copy(
+            update={
+                "upstream_artifacts": compact_artifacts,
+                "metadata": {
+                    **request.metadata,
+                    "agent_profile": profile.model_dump(mode="json"),
+                    "provider_id": profile.provider_id or request.metadata.get("provider_id"),
+                    "model": profile.model or request.metadata.get("model"),
+                    "parser_strategy": profile.parser_strategy,
+                    "compact_mode_enabled": profile.compact_mode_enabled,
+                    "retry_policy": profile.retry_policy,
+                    "handoff_summary_max_tokens": profile.handoff_summary_max_tokens,
+                    "enable_repo_context": profile.enable_repo_context,
+                    "enable_governance_context": profile.enable_governance_context,
+                    "enable_examples": profile.enable_examples,
+                    "enable_diagrams": profile.enable_diagrams,
+                },
+            }
+        )
         provider_call_id = f"{execution_id}:{agent_name}:attempt:{attempts[agent_name]}"
+        await self._emit(
+            "provider_selected_per_agent",
+            {
+                **state,
+                "next_agent": agent_name,
+                "attempts": attempts,
+                "metadata": {
+                    **dict(state.get("metadata", {})),
+                    "agent": agent_name,
+                    "provider_id": request.metadata.get("provider_id"),
+                    "model": request.metadata.get("model"),
+                    "execution_owner": self._execution_owner,
+                    "provider_call_id": provider_call_id,
+                    "attempt": attempts[agent_name],
+                },
+            },
+        )
+        if bool(request.metadata.get("compact_mode_enabled", False)) or bool(request.metadata.get("local_lm_studio_safe_mode", False)):
+            await self._emit(
+                "compact_mode_enabled",
+                {
+                    **state,
+                    "next_agent": agent_name,
+                    "attempts": attempts,
+                    "metadata": {
+                        **dict(state.get("metadata", {})),
+                        "agent": agent_name,
+                        "execution_owner": self._execution_owner,
+                        "provider_call_id": provider_call_id,
+                        "attempt": attempts[agent_name],
+                    },
+                },
+            )
         if not await self._acquire_agent_lock(execution_id, workflow_state.workflow_id, agent_name):
             result = AgentExecutionResult(
                 execution_id=execution_id,
@@ -290,12 +354,76 @@ class LangGraphExecutionRuntime:
                 agent_name=agent_name,
                 status=AgentStatus.FAILED,
                 errors=(str(exc),),
-                metadata={"route_signal": "retry"},
+                metadata={"route_signal": "retry", "error_type": "runtime_error"},
             )
         finally:
             await self._release_agent_lock(execution_id, workflow_state.workflow_id, agent_name)
 
+        prompt_budget = result.metadata.get("prompt_budget", {}) if isinstance(result.metadata, dict) else {}
+        if prompt_budget:
+            await self._emit(
+                "context_budget_estimated",
+                {
+                    **state,
+                    "next_agent": agent_name,
+                    "attempts": attempts,
+                    "metadata": {
+                        **dict(state.get("metadata", {})),
+                        "agent": agent_name,
+                        "attempt": attempts[agent_name],
+                        "provider_call_id": provider_call_id,
+                        "execution_owner": self._execution_owner,
+                        "prompt_tokens_before": prompt_budget.get("prompt_tokens_before"),
+                        "prompt_tokens_after": prompt_budget.get("prompt_tokens_after"),
+                        "final_prompt_tokens": prompt_budget.get("final_prompt_tokens"),
+                        "budget": prompt_budget.get("budget"),
+                    },
+                },
+            )
+            if prompt_budget.get("compression_applied"):
+                await self._emit(
+                    "context_compressed",
+                    {
+                        **state,
+                        "next_agent": agent_name,
+                        "attempts": attempts,
+                        "metadata": {
+                            **dict(state.get("metadata", {})),
+                            "agent": agent_name,
+                            "attempt": attempts[agent_name],
+                            "provider_call_id": provider_call_id,
+                            "sections_removed": prompt_budget.get("sections_removed", 0),
+                            "prompt_tokens_after": prompt_budget.get("prompt_tokens_after"),
+                        },
+                    },
+                )
+            if prompt_budget.get("oversized_prompt_blocked"):
+                await self._emit(
+                    "oversized_prompt_blocked",
+                    {
+                        **state,
+                        "next_agent": agent_name,
+                        "attempts": attempts,
+                        "metadata": {
+                            **dict(state.get("metadata", {})),
+                            "agent": agent_name,
+                            "attempt": attempts[agent_name],
+                            "provider_call_id": provider_call_id,
+                            "final_prompt_tokens": prompt_budget.get("final_prompt_tokens"),
+                            "budget": prompt_budget.get("budget"),
+                        },
+                    },
+                )
+
         updated_workflow_state = self._apply_result(workflow_state, result, attempts[agent_name])
+        handoff_text = self._context_governor.compact_handoff(
+            agent_name=agent_name,
+            summary=result.summary,
+            metadata=result.metadata.get("structured_output", {}) if isinstance(result.metadata, dict) else {},
+            max_tokens=int(request.metadata.get("handoff_summary_max_tokens", 500)),
+        )
+        handoffs = dict(state.get("metadata", {}).get("handoff_summaries", {}))
+        handoffs[agent_name] = handoff_text
         errors = list(state.get("errors", []))
         if result.errors:
             errors.extend(result.errors)
@@ -305,12 +433,40 @@ class LangGraphExecutionRuntime:
             "last_agent": agent_name,
             "attempts": attempts,
             "errors": errors,
-            "metadata": dict(state.get("metadata", {})),
+            "metadata": {
+                **dict(state.get("metadata", {})),
+                "handoff_summaries": handoffs,
+            },
         }
+        await self._emit(
+            "handoff_generated",
+            {
+                **updated_state,
+                "metadata": {
+                    **dict(updated_state.get("metadata", {})),
+                    "handoff_tokens": self._context_governor.estimate_tokens(handoff_text),
+                    "handoff_agent": agent_name,
+                    "execution_owner": self._execution_owner,
+                    "provider_call_id": provider_call_id,
+                },
+            },
+        )
         await self._emit(
             "agent_completed" if result.status == AgentStatus.COMPLETED else "agent_failed",
             updated_state,
         )
+        if result.status == AgentStatus.COMPLETED:
+            await self._emit(
+                "stage_transition",
+                {
+                    **updated_state,
+                    "metadata": {
+                        **dict(updated_state.get("metadata", {})),
+                        "completed_agent": agent_name,
+                        "next_stage_candidate": self._next_agent(updated_state),
+                    },
+                },
+            )
         latest_record = await self._repository.get(execution_id)
         if latest_record.status == WorkflowRunStatus.CANCELLED:
             return await self._persist_state(
@@ -401,6 +557,12 @@ class LangGraphExecutionRuntime:
         return sequence[index + 1]
 
     def _sequence_for_metadata(self, metadata: dict[str, Any]) -> tuple[str, ...]:
+        enabled_agents = metadata.get("enabled_agents")
+        if isinstance(enabled_agents, (list, tuple)):
+            normalized = tuple(str(item).strip().lower() for item in enabled_agents if str(item).strip())
+            filtered = tuple(agent for agent in DEFAULT_DELIVERY_SEQUENCE if agent in normalized)
+            if filtered:
+                return filtered
         mode = str(metadata.get("workflow_mode", metadata.get("workflow_type", "full"))).lower().strip()
         if mode in {"ba_only", "ba-only", "ba"}:
             return ("ba",)

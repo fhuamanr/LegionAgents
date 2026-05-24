@@ -229,5 +229,28 @@ async def test_ba_sections_parse_failure_does_not_emit_retry_started() -> None:
         "Test BA parser fallback",
         metadata={"workflow_mode": "ba_only"},
     )
-    assert result.status == WorkflowRunStatus.FAILED
+    assert result.status == WorkflowRunStatus.COMPLETED
     assert "retry_started" not in events
+
+
+@pytest.mark.asyncio
+async def test_local_safe_mode_emits_compaction_and_handoff_events() -> None:
+    events: list[str] = []
+
+    async def hook(event_name: str, state: dict[str, object]) -> None:
+        events.append(event_name)
+
+    client = CountingWorkflowModelClient()
+    runtime = LangGraphExecutionRuntime(
+        model_client=client,
+        event_hook=hook,
+    )
+    result = await runtime.start(
+        "Necesito hacer un e-commerce tipo MercadoLibre con productos, usuarios y carrito, MVP funcional.",
+        metadata={"workflow_mode": "ba_only", "local_lm_studio_safe_mode": True},
+    )
+    assert result.status == WorkflowRunStatus.COMPLETED
+    assert "provider_selected_per_agent" in events
+    assert "compact_mode_enabled" in events
+    assert "context_budget_estimated" in events
+    assert "handoff_generated" in events

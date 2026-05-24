@@ -9,7 +9,7 @@ from fastapi import FastAPI
 
 from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.security import SecurityContextMiddleware
-from app.routers import agents, approvals, chat, dashboard, executions, governance_management, health, observability, prompt_studio, providers, reports, security, uploads, workflows, workspace_management
+from app.routers import agent_playground, agents, approvals, chat, dashboard, executions, governance_management, health, observability, prompt_studio, providers, reports, security, uploads, workflows, workspace_management
 from app.dependencies.container import (
     get_approval_service,
     get_chat_service,
@@ -61,6 +61,7 @@ def create_app(execution_service: ExecutionService | None = None) -> FastAPI:
     app.include_router(chat.router)
     app.include_router(workspace_management.router)
     app.include_router(workflows.router)
+    app.include_router(agent_playground.router)
     app.include_router(dashboard.router)
     app.include_router(executions.router)
     app.include_router(agents.router)

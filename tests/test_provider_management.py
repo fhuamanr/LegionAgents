@@ -1,9 +1,14 @@
 from fastapi.testclient import TestClient
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import os
 from threading import Thread
+from uuid import uuid4
 
 from app.main import create_app
+from app.schemas import LMStudioLoadModelRequest, ProviderModelAssignRequest, ProviderWorkflowPreflightRequest
+from app.services.provider_service import ProviderApplicationService
 from app.services.execution_service import ExecutionService
+from core.agents.providers import ProviderConfig, ProviderKind, ProviderRegistry
 from tests.test_real_workflow_runtime import WorkflowModelClient
 
 
@@ -283,3 +288,117 @@ def test_provider_manual_model_profile_update() -> None:
     model = next(item for item in models if item["model_id"] == "my-model")
     assert model["context_window_tokens"] == 16384
     assert model["detection_source"] == "manual"
+
+
+def test_lmstudio_runtime_management_updates_actual_context_profile() -> None:
+    import asyncio
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/v1/models":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"qwen2.5-coder-14b"}]}')
+                return
+            if self.path == "/api/v0/models/loaded":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"data":[]}')
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def do_POST(self):  # noqa: N802
+            if self.path == "/api/v0/models/load":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"loading"}')
+                return
+            if self.path == "/api/v0/models/unload":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"unloaded"}')
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format, *args):  # noqa: A003
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    previous = os.environ.get("ENABLE_LOCAL_MODEL_MANAGEMENT")
+    os.environ["ENABLE_LOCAL_MODEL_MANAGEMENT"] = "true"
+    try:
+        registry = ProviderRegistry()
+        service = ProviderApplicationService(registry)
+        provider = ProviderConfig(
+            id=uuid4(),
+            name="LM Studio",
+            kind=ProviderKind.LM_STUDIO,
+            base_url=f"http://127.0.0.1:{server.server_port}/v1",
+            default_model="qwen2.5-coder-14b",
+        )
+        asyncio.run(registry.upsert(provider))
+        response = asyncio.run(
+            service.lmstudio_load_model(
+                provider.id,
+                LMStudioLoadModelRequest(
+                    model_id="qwen2.5-coder-14b",
+                    context_length=8192,
+                    parallel_slots=1,
+                ),
+            )
+        )
+        model = next(item for item in response.models if item["model_id"] == "qwen2.5-coder-14b")
+        assert model["context_window_tokens"] == 8192
+        assert model["runtime_status"] == "loaded"
+    finally:
+        if previous is None:
+            os.environ.pop("ENABLE_LOCAL_MODEL_MANAGEMENT", None)
+        else:
+            os.environ["ENABLE_LOCAL_MODEL_MANAGEMENT"] = previous
+        server.shutdown()
+        server.server_close()
+
+
+def test_provider_preflight_warns_unloaded_local_models() -> None:
+    registry = ProviderRegistry()
+    service = ProviderApplicationService(registry)
+    import asyncio
+
+    provider = ProviderConfig(
+        id=uuid4(),
+        name="LM Studio",
+        kind=ProviderKind.LM_STUDIO,
+        base_url="http://localhost:1234/v1",
+        default_model="qwen",
+        agent_models={"ba": "qwen"},
+    )
+    asyncio.run(registry.upsert(provider))
+    asyncio.run(registry.update_model_profile(provider.id, "qwen", {"runtime_status": "unloaded", "context_window_tokens": 4096}))
+    result = asyncio.run(service.preflight(provider.id, ProviderWorkflowPreflightRequest(required_agents=("ba",))))
+    assert result.ok is False
+    assert any("not loaded" in warning for warning in result.warnings)
+
+
+def test_assign_agent_model_updates_provider_mapping() -> None:
+    registry = ProviderRegistry()
+    service = ProviderApplicationService(registry)
+    import asyncio
+
+    provider = ProviderConfig(
+        id=uuid4(),
+        name="Local",
+        kind=ProviderKind.LOCAL_LM_STUDIO,
+        base_url="http://localhost:1234/v1",
+        default_model="model-a",
+    )
+    asyncio.run(registry.upsert(provider))
+    updated = asyncio.run(service.assign_agent_model(provider.id, agent_name="architect", request=ProviderModelAssignRequest(model_id="model-b")))
+    assert updated.provider["agent_models"]["architect"] == "model-b"

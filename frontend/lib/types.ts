@@ -327,7 +327,7 @@ export interface PromptTestSummary {
   readonly evaluation: PromptEvaluationSummary;
 }
 
-export type LlmProviderKind = "openai" | "cursor" | "openrouter" | "ollama" | "lm_studio" | "local" | "custom";
+export type LlmProviderKind = "openai" | "cursor" | "openrouter" | "ollama" | "lm_studio" | "local_lm_studio" | "local" | "custom";
 export type LlmProviderStatus = "active" | "disabled";
 
 export interface LlmProviderSummary {
@@ -346,6 +346,7 @@ export interface LlmProviderSummary {
   readonly configured: boolean;
   readonly isDefault?: boolean;
   readonly updatedAt: string;
+  readonly metadata?: Record<string, unknown>;
   readonly modelProfiles?: Record<string, LlmModelCapabilityProfile>;
 }
 
@@ -374,6 +375,11 @@ export interface LlmModelCapabilityProfile {
   readonly compactModeRequired: boolean;
   readonly notes?: string;
   readonly detectionSource: string;
+  readonly loadedModelId?: string;
+  readonly localRuntimeManagedByPlatform?: boolean;
+  readonly runtimeStatus?: string;
+  readonly lastLoadedAt?: string;
+  readonly lastHealthCheckAt?: string;
   readonly lastRefreshedAt: string;
 }
 

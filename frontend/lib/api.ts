@@ -161,6 +161,7 @@ function normalizeProvider(item: Record<string, unknown>): LlmProviderSummary {
     configured: Boolean(item.configured),
     isDefault: Boolean(item.is_default ?? false),
     updatedAt: String(item.updated_at ?? ""),
+    metadata: (item.metadata ?? {}) as Record<string, unknown>,
     modelProfiles: normalizeModelProfiles(item.model_profiles),
   };
 }
@@ -203,6 +204,11 @@ function normalizeModelProfile(item: Record<string, unknown>): import("./types")
     compactModeRequired: Boolean(item.compact_mode_required ?? true),
     notes: item.notes ? String(item.notes) : undefined,
     detectionSource: String(item.detection_source ?? "estimated"),
+    loadedModelId: item.loaded_model_id ? String(item.loaded_model_id) : undefined,
+    localRuntimeManagedByPlatform: Boolean(item.local_runtime_managed_by_platform ?? false),
+    runtimeStatus: item.runtime_status ? String(item.runtime_status) : undefined,
+    lastLoadedAt: item.last_loaded_at ? String(item.last_loaded_at) : undefined,
+    lastHealthCheckAt: item.last_health_check_at ? String(item.last_health_check_at) : undefined,
     lastRefreshedAt: String(item.last_refreshed_at ?? ""),
   };
 }

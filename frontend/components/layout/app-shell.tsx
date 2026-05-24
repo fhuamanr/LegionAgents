@@ -13,6 +13,7 @@ const navItems: readonly NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboard/workspaces", label: "Workspaces", icon: Boxes },
   { href: "/dashboard/workspace", label: "Workspace", icon: MessageSquareText },
+  { href: "/dashboard/playground", label: "Playground", icon: Activity },
   { href: "/dashboard/providers", label: "Providers", icon: ServerCog },
   { href: "/dashboard/executions", label: "Executions", icon: Activity },
   { href: "/dashboard/qa", label: "QA Reports", icon: Bug },

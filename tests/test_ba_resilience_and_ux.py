@@ -153,14 +153,14 @@ async def test_schema_error_classified_and_not_retried() -> None:
 @pytest.mark.asyncio
 async def test_agent_failure_includes_raw_output_preview() -> None:
     agent = _MinimalAgent(
-        config=RuntimeAgentConfig(name="ba", role="business analyst", context_path=Path("agents/ba"), output_schema_name="BARequirementsOutput"),
+        config=RuntimeAgentConfig(name="architect", role="architect", context_path=Path("agents/architect"), output_schema_name="BARequirementsOutput"),
         output_validator=PydanticOutputValidator(BARequirementsOutput),
     )
     result: AgentExecutionResult = await agent.execute(
         AgentExecutionRequest(
             execution_id=uuid4(),
             workflow_id=uuid4(),
-            agent_name="ba",
+            agent_name="architect",
             task="test",
             metadata={"local_lm_studio_safe_mode": True},
         )
