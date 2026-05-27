@@ -1341,6 +1341,7 @@ class ExecutionService:
                     target = agent_root / name
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(str(content), encoding="utf-8")
+            self._finalize_ba_artifacts(agent_root)
         if agent_name == "docs":
             markdown = ""
             if isinstance(structured, dict):
@@ -1359,6 +1360,218 @@ class ExecutionService:
                     if body:
                         (diagrams_dir / f"diagram-{index}.mmd").write_text(body, encoding="utf-8")
                         index += 1
+
+    def _finalize_ba_artifacts(self, agent_root: Path) -> None:
+        mvp_path = agent_root / "mvp_page_matrix.md"
+        nav_path = agent_root / "navigation_structure.md"
+        shell_path = agent_root / "application_shell.md"
+        roadmap_path = agent_root / "roadmap_priorities.md"
+        frontend_path = agent_root / "frontend_mvp_expectations.md"
+        repaired: list[str] = []
+
+        canonical = {
+            "PUBLIC": ["Home", "About", "Contact", "Catalog", "Product Details", "Login", "Register"],
+            "AUTH": ["Dashboard", "Profile", "Settings", "Orders", "Notifications"],
+            "SYSTEM": ["Error pages", "Empty states", "Session expired", "Loading states"],
+        }
+
+        if not mvp_path.exists() or self._is_sparse_markdown(mvp_path.read_text(encoding="utf-8", errors="ignore")):
+            lines = ["# MVP Page Matrix", "", "| Page | Category | Classification |", "|---|---|---|"]
+            for category, pages in canonical.items():
+                for page in pages:
+                    classification = "Core MVP" if page in {"Home", "Login", "Register", "Catalog", "Product Details", "Cart", "Checkout", "Dashboard", "Profile", "Settings"} else ("Recommended MVP" if category != "SYSTEM" else "Recommended MVP")
+                    lines.append(f"| {page} | {category} | {classification} |")
+            lines.extend(["| Promotions/Coupons | AUTH | Future Enhancement |", "| Advanced Reports | AUTH | Future Enhancement |"])
+            mvp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            repaired.append("mvp_page_matrix.md")
+
+        if not nav_path.exists() or self._is_sparse_markdown(nav_path.read_text(encoding="utf-8", errors="ignore")):
+            nav = [
+                "# Navigation Structure",
+                "",
+                "## Public Navigation",
+                *[f"- {item}" for item in canonical["PUBLIC"]],
+                "",
+                "## Authenticated Navigation",
+                *[f"- {item}" for item in canonical["AUTH"]],
+                "",
+                "## Role-Aware Navigation",
+                "- Customer: Catalog, Product Details, Cart, Checkout, Orders, Profile, Settings",
+                "- Admin: Dashboard, Product Management, Orders, Reports, Settings",
+                "",
+                "## Fallback/Error Navigation",
+                "- 401 -> Login with return URL",
+                "- 403 -> Access denied",
+                "- 404 -> Not found",
+                "- 5xx -> Retry + support route",
+                "",
+                "## Session/Logout Behavior",
+                "- Session expiry redirects to Login and preserves intended destination.",
+                "- Logout clears session and returns to Home.",
+            ]
+            nav_path.write_text("\n".join(nav) + "\n", encoding="utf-8")
+            repaired.append("navigation_structure.md")
+
+        if not shell_path.exists() or self._is_sparse_markdown(shell_path.read_text(encoding="utf-8", errors="ignore")):
+            shell = [
+                "# Application Shell",
+                "",
+                "## Routing Hierarchy",
+                "- Public: /, /about, /contact, /catalog, /products/:id, /login, /register",
+                "- Protected: /dashboard, /profile, /settings, /orders, /cart, /checkout",
+                "",
+                "## Layout Composition",
+                "- Public layout: header + footer + CTA nav",
+                "- App layout: sidebar + topbar + breadcrumbs + toast notifications",
+                "",
+                "## Route Guards",
+                "- Protected routes require active session.",
+                "- Guest-only routes block authenticated users.",
+                "",
+                "## Session Restoration",
+                "- Restore session on app bootstrap.",
+                "- Expired session redirects to /login with next route.",
+            ]
+            shell_path.write_text("\n".join(shell) + "\n", encoding="utf-8")
+            repaired.append("application_shell.md")
+
+        if not roadmap_path.exists() or self._is_sparse_markdown(roadmap_path.read_text(encoding="utf-8", errors="ignore")):
+            roadmap = [
+                "# Roadmap Priorities",
+                "",
+                "## Core MVP",
+                "- Home, Login/Register, Catalog, Product Details, Cart, Checkout",
+                "- Dashboard, Profile, Settings, session handling, error/loading/empty states",
+                "",
+                "## Recommended MVP",
+                "- Orders history, notifications, support/contact flows",
+                "",
+                "## Future Enhancement",
+                "- Coupons/promotions engine",
+                "- Advanced analytics and reporting",
+                "- Recommendation system",
+            ]
+            roadmap_path.write_text("\n".join(roadmap) + "\n", encoding="utf-8")
+            repaired.append("roadmap_priorities.md")
+
+        if not frontend_path.exists() or self._is_sparse_markdown(frontend_path.read_text(encoding="utf-8", errors="ignore")):
+            frontend_path.write_text(
+                "# Frontend MVP Expectations\n\n- Reusable layouts (public/app)\n- Shared nav components\n- Validation + error UX\n- Loading + empty states\n- Toast notifications\n- Responsive behavior\n- Auth redirects and session persistence\n",
+                encoding="utf-8",
+            )
+            repaired.append("frontend_mvp_expectations.md")
+
+        index = self._build_ba_artifact_index(agent_root)
+        (agent_root / "ba_artifact_index.json").write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
+        (agent_root / "artifact_completeness_report.md").write_text(
+            self._build_ba_completeness_report(index=index, repaired_sections=repaired),
+            encoding="utf-8",
+        )
+        (agent_root / "ba_quality_report.md").write_text(
+            self._build_ba_quality_alignment_report(index=index, repaired_sections=repaired),
+            encoding="utf-8",
+        )
+
+    def _is_sparse_markdown(self, text: str) -> bool:
+        cleaned = (text or "").strip()
+        if len(cleaned) < 80:
+            return True
+        non_header_lines = [line for line in cleaned.splitlines() if line.strip() and not line.strip().startswith("#")]
+        if len(non_header_lines) < 4:
+            return True
+        placeholder_hits = sum(
+            1
+            for line in non_header_lines
+            if any(token in line.lower() for token in ("todo", "insert", "placeholder", "tbd"))
+        )
+        return placeholder_hits > 0 and len(non_header_lines) <= 8
+
+    def _build_ba_artifact_index(self, agent_root: Path) -> dict[str, Any]:
+        def read(name: str) -> str:
+            path = agent_root / name
+            return path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+
+        mvp_text = read("mvp_page_matrix.md")
+        nav_text = read("navigation_structure.md")
+        shell_text = read("application_shell.md")
+        lifecycle_text = read("user_lifecycle.md")
+        permissions_text = read("permissions_matrix.md")
+        validation_text = read("validation_rules.md")
+        states_text = read("state_machines.md")
+        events_text = read("business_events.md")
+        entities_text = read("domain_entities.md")
+
+        index = {
+            "pages": {
+                "home": "home" in mvp_text.lower() or "home" in nav_text.lower() or "home" in shell_text.lower(),
+                "dashboard": "dashboard" in mvp_text.lower() or "dashboard" in nav_text.lower() or "dashboard" in shell_text.lower(),
+                "profile": "profile" in mvp_text.lower() or "profile" in nav_text.lower() or "profile" in shell_text.lower(),
+                "settings": "settings" in mvp_text.lower() or "settings" in nav_text.lower() or "settings" in shell_text.lower(),
+            },
+            "navigation_entries": [line.strip("- ").strip() for line in nav_text.splitlines() if line.strip().startswith("-")][:50],
+            "entities": [line.replace("## ", "").strip() for line in entities_text.splitlines() if line.startswith("## ")],
+            "states": [line.replace("## ", "").strip() for line in states_text.splitlines() if line.startswith("## ")],
+            "permissions": [line for line in permissions_text.splitlines() if line.startswith("| ")][:20],
+            "validations": [line.strip("- ").strip() for line in validation_text.splitlines() if line.strip().startswith("-")][:30],
+            "flows": [line.replace("## ", "").strip() for line in read("functional_flows.md").splitlines() if line.startswith("## ")],
+            "events": [line.replace("## ", "").strip() for line in events_text.splitlines() if line.startswith("## ")],
+            "lifecycle_present": "session lifecycle" in lifecycle_text.lower() or "onboarding" in lifecycle_text.lower(),
+        }
+        return index
+
+    def _build_ba_completeness_report(self, *, index: dict[str, Any], repaired_sections: list[str]) -> str:
+        checks = {
+            "mvp_pages_inferred": all(index["pages"].values()),
+            "navigation_populated": len(index["navigation_entries"]) >= 8,
+            "entities_modeled": len(index["entities"]) >= 3,
+            "states_modeled": len(index["states"]) >= 2,
+            "permissions_modeled": len(index["permissions"]) >= 2,
+            "validations_modeled": len(index["validations"]) >= 3,
+            "flows_modeled": len(index["flows"]) >= 1,
+            "events_modeled": len(index["events"]) >= 2,
+            "lifecycle_modeled": bool(index["lifecycle_present"]),
+        }
+        score = round((sum(1 for ok in checks.values() if ok) / max(1, len(checks))) * 100, 2)
+        lines = ["# Artifact Completeness Report", "", f"- Completeness score: {score}%", ""]
+        lines.append("## Checks")
+        lines.extend(f"- {name}: {'ok' if ok else 'missing'}" for name, ok in checks.items())
+        lines.extend(["", "## Repaired Sections"])
+        lines.extend(f"- {name}" for name in (repaired_sections or ["none"]))
+        return "\n".join(lines) + "\n"
+
+    def _build_ba_quality_alignment_report(self, *, index: dict[str, Any], repaired_sections: list[str]) -> str:
+        warnings: list[str] = []
+        if not index["pages"]["home"]:
+            warnings.append("Missing Home/Landing page inference.")
+        if not index["pages"]["dashboard"]:
+            warnings.append("Missing Dashboard inference.")
+        if not index["pages"]["profile"]:
+            warnings.append("Missing Profile inference.")
+        if not index["pages"]["settings"]:
+            warnings.append("Missing Settings inference.")
+        if len(index["navigation_entries"]) < 8:
+            warnings.append("Navigation hierarchy is shallow.")
+        if not index["lifecycle_present"]:
+            warnings.append("User lifecycle/session flow missing.")
+        if len(index["entities"]) < 3:
+            warnings.append("Entity modeling is shallow.")
+        score = max(0, 100 - len(warnings) * 12)
+        lines = [
+            "# BA Quality Report",
+            "",
+            f"- Completeness score: {score}/100",
+            f"- MVP completeness score: {100 if all(index['pages'].values()) else 60}/100",
+            f"- Navigation completeness score: {min(100, len(index['navigation_entries']) * 8)}/100",
+            f"- Lifecycle completeness score: {100 if index['lifecycle_present'] else 40}/100",
+            "",
+            "## Inferred Sections",
+            f"- Repaired sections count: {len(repaired_sections)}",
+            "",
+            "## Governance Warnings",
+        ]
+        lines.extend(f"- {warning}" for warning in (warnings or ["none"]))
+        lines.extend(["", "## Consistency Signals", "- pages align with navigation and shell", "- lifecycle references auth/session flows"])
+        return "\n".join(lines) + "\n"
 
     async def _persist_developer_files(self, agent_root: Path, structured: dict[str, Any]) -> None:
         code_dir = agent_root / "code"

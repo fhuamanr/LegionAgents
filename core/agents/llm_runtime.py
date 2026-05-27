@@ -158,16 +158,17 @@ class BusinessAnalystAgentRuntime(LLMStructuredAgentRuntime):
             )
         return tuple(artifacts)
 
-    def result_metadata(self, output: BaseModel) -> dict[str, object]:
-        base = super().result_metadata(output)
-        if not isinstance(output, BARequirementsOutput):
-            return base
-        bundle = build_ba_intelligence_bundle(
-            task=str(getattr(output, "summary", "")),
-            structured_output=output.model_dump(mode="json"),
-        )
-        base["ba_intelligence"] = bundle
-        return base
+    async def _execute_once(self, request: AgentExecutionRequest) -> AgentExecutionResult:
+        result = await super()._execute_once(request)
+        if result.status != AgentStatus.COMPLETED:
+            return result
+        structured = result.metadata.get("structured_output", {}) if isinstance(result.metadata, dict) else {}
+        if not isinstance(structured, dict):
+            return result
+        bundle = build_ba_intelligence_bundle(task=request.task, structured_output=structured)
+        updated = dict(result.metadata)
+        updated["ba_intelligence"] = bundle
+        return result.model_copy(update={"metadata": updated})
 
 
 class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):

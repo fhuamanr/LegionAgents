@@ -1,9 +1,0 @@
-{
-  "agent_name": "docs",
-  "summary": "```json",
-  "documents": [],
-  "metadata": {
-    "handoff": "Docs completed with warnings.",
-    "documentation_markdown": "```json\n{\n  \"docs\": {\n    \"title\": \"E-commerce MVP Documentation\",\n    \"sections\": [\n      {\n        \"name\": \"Overview\",\n        \"content\": \"This document outlines the development of a minimal viable product (MVP) e-commerce platform similar to MercadoLibre. The platform includes product listings, user management, and a shopping cart, without any external integrations.\"\n      },\n      {\n        \"name\": \"Requirements\",\n        \"content\": \"[Insert structured output from ba]\"\n      },\n      {\n        \"name\": \"Governance Report\",\n        \"content\": \"[Insert governance_report.json from ba]\"\n      },\n      {\n        \"name\": \"Architecture Design\",\n        \"content\": \"[Insert structured output from architect]\"\n      },\n      {\n        \"name\": \"Source Code Overview\",\n        \"content\": \"[Insert structured output from developer]\"\n      },\n      {\n        \"name\": \"Test Report\",\n        \"content\": \"[Insert test_report.json from qa]\"\n      }\n    ]\n  }\n}\n```"
-  }
-}
