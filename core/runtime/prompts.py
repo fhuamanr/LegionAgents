@@ -88,7 +88,8 @@ class RuntimePromptBuilder(PromptBuilder):
                 '  "tests": [{"path":"src/file.test.tsx","test_type":"unit","description":"...","content":"..."}],\n'
                 '  "handoff": "Short handoff for QA."\n'
                 "}\n"
-                "Local compact mode limits: max 3 code_changes and max 3 tests."
+                "Local compact mode limits: max 3 code_changes and max 3 tests.\n"
+                "Prefer realistic implementations with validation, error handling, and API integration."
             )
         if config.name == "qa":
             user_sections.append(
@@ -104,6 +105,26 @@ class RuntimePromptBuilder(PromptBuilder):
                 "}\n"
                 "If no tests are available, still provide agent_name and summary."
             )
+        if config.name == "ba":
+            user_sections.append(
+                "# BA Depth Requirements\n\n"
+                "Include: executive summary, scope, functional requirements, non-functional requirements, business rules, "
+                "edge cases, UX expectations, permissions/roles, assumptions, risks, and functional flows."
+            )
+        if config.name == "architect":
+            user_sections.append(
+                "# Architect Depth Requirements\n\n"
+                "Include: layered architecture, module boundaries, API contracts, entity relationships, database design, "
+                "deployment architecture, auth/authz strategy, observability, and scalability notes."
+            )
+        quality_rules = metadata.get("quality_rules")
+        if isinstance(quality_rules, dict) and quality_rules:
+            warnings = [
+                "Avoid placeholder-heavy output.",
+                "Avoid empty methods and TODO-only responses.",
+                "Include validations, tests, and API contracts where applicable.",
+            ]
+            user_sections.append("# Implementation Quality Rules\n\n" + "\n".join(f"- {item}" for item in warnings))
 
         governance_text = context.agent_context.metadata.get("governance_text")
         if governance_text and enable_governance:

@@ -116,6 +116,29 @@ def test_agent_statuses() -> None:
     assert set(response.json()["agents"]) >= {"ba", "architect", "developer", "qa", "docs", "pr"}
 
 
+def test_improve_existing_execution_generates_quality_bundle() -> None:
+    client = _client()
+    workflow_response = client.post("/workflows", json={"task": "Deliver quality bundle"})
+    assert workflow_response.status_code == 202
+    workflow = workflow_response.json()
+    workflow_id = workflow["workflow_id"]
+    artifact_root = workflow["metadata"]["artifacts_root"]
+
+    improve_response = client.post(
+        f"/workflows/{workflow_id}/improve",
+        json={
+            "artifact_root": artifact_root,
+            "selected_agents": ["ba", "architect", "developer", "qa", "docs"],
+            "improvement_depth": "balanced",
+        },
+    )
+    assert improve_response.status_code == 200
+    payload = improve_response.json()
+    assert payload["workflow_id"] == workflow_id
+    assert payload["quality_report_path"].endswith("quality_report.md")
+    assert "implementation_depth" in payload["quality_metrics"]
+
+
 def test_approval_gate_pauses_and_resumes_workflow_api() -> None:
     client = _client()
 

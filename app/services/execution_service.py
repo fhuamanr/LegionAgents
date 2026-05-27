@@ -3,6 +3,7 @@
 import asyncio
 import os
 import json
+import re
 from datetime import datetime, timezone
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from app.schemas import (
+    ImproveExecutionRequest,
+    ImproveExecutionResponse,
     AgentPlaygroundArtifactListResponse,
     AgentPlaygroundArtifactSummary,
     AgentPlaygroundHandoffUpdateRequest,
@@ -210,6 +213,17 @@ class ExecutionService:
         metadata: dict[str, Any] = dict(request.metadata)
         local_safe_mode = str(os.getenv("LOCAL_LM_STUDIO_SAFE_MODE", "")).strip().lower() in {"1", "true", "yes", "on"}
         metadata.setdefault("local_lm_studio_safe_mode", local_safe_mode)
+        metadata.setdefault(
+            "quality_rules",
+            {
+                "placeholder_density_warning_threshold": 0.03,
+                "require_validations": True,
+                "require_tests": True,
+                "require_api_contracts": True,
+                "require_documentation": True,
+            },
+        )
+        metadata.setdefault("developer_passes", 6 if not local_safe_mode else 2)
         if local_safe_mode and "workflow_mode" not in metadata and "workflow_type" not in metadata:
             metadata["workflow_mode"] = "ba_only"
         if request.upload_id:
@@ -585,6 +599,412 @@ class ExecutionService:
             created_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
             preview=preview,
         )
+
+    async def improve_existing_execution(self, workflow_id: UUID, request: ImproveExecutionRequest) -> ImproveExecutionResponse:
+        source_root = Path(request.artifact_root).resolve()
+        if not source_root.exists():
+            raise KeyError(str(source_root))
+
+        improvements_root = (self._artifact_root / str(workflow_id) / "improvements").resolve()
+        improvements_root.mkdir(parents=True, exist_ok=True)
+
+        summary = self._collect_artifact_quality_summary(source_root, request.selected_agents)
+        quality_report = self._build_quality_report_markdown(summary, source_root)
+        quality_report_path = improvements_root / "quality_report.md"
+        quality_report_path.write_text(quality_report, encoding="utf-8")
+
+        if "ba" in request.selected_agents:
+            self._write_ba_improvement_docs(source_root, improvements_root)
+        if "architect" in request.selected_agents:
+            self._write_architect_improvement_docs(source_root, improvements_root)
+        if "developer" in request.selected_agents:
+            self._write_developer_improvement_docs(source_root, improvements_root)
+        if "qa" in request.selected_agents:
+            self._write_qa_improvement_docs(source_root, improvements_root)
+        if "docs" in request.selected_agents:
+            self._write_docs_improvement_docs(source_root, improvements_root)
+
+        return ImproveExecutionResponse(
+            workflow_id=workflow_id,
+            improvements_path=str(improvements_root),
+            quality_report_path=str(quality_report_path),
+            quality_metrics=summary["metrics"],
+            weaknesses=tuple(summary["weaknesses"]),
+            strengths=tuple(summary["strengths"]),
+        )
+
+    def _collect_artifact_quality_summary(self, source_root: Path, selected_agents: tuple[str, ...]) -> dict[str, Any]:
+        weaknesses: list[str] = []
+        strengths: list[str] = []
+        metrics: dict[str, float] = {}
+
+        for agent in selected_agents:
+            structured_path = source_root / agent / "structured_output.json"
+            raw_path = source_root / agent / "raw_output.md"
+            if not structured_path.exists() and not raw_path.exists():
+                weaknesses.append(f"{agent}: missing structured/raw output artifacts.")
+                metrics[f"{agent}_completeness"] = 0.0
+                continue
+
+            content = ""
+            structured: dict[str, Any] = {}
+            if structured_path.exists():
+                content = structured_path.read_text(encoding="utf-8", errors="ignore")
+                try:
+                    structured = json.loads(content)
+                except json.JSONDecodeError:
+                    weaknesses.append(f"{agent}: structured_output.json is not valid JSON.")
+            elif raw_path.exists():
+                content = raw_path.read_text(encoding="utf-8", errors="ignore")
+
+            tokenish = max(1, len(content) // 4)
+            placeholder_hits = len(re.findall(r"\b(TODO|placeholder|insert|lorem|draft)\b", content, flags=re.IGNORECASE))
+            placeholder_density = placeholder_hits / max(1, tokenish)
+            completeness = max(0.0, min(1.0, (tokenish / 450.0) * (1.0 - min(0.8, placeholder_density))))
+            metrics[f"{agent}_completeness"] = round(completeness * 100, 2)
+            metrics[f"{agent}_placeholder_density"] = round(placeholder_density, 4)
+
+            if completeness < 0.45:
+                weaknesses.append(f"{agent}: output depth is shallow (score={metrics[f'{agent}_completeness']}).")
+            else:
+                strengths.append(f"{agent}: produced non-trivial output volume.")
+            if placeholder_density > 0.03:
+                weaknesses.append(f"{agent}: placeholder-heavy content detected (density={metrics[f'{agent}_placeholder_density']}).")
+
+            if agent == "developer" and structured:
+                code_changes = structured.get("code_changes", [])
+                tests = structured.get("tests", [])
+                if len(code_changes) < 3:
+                    weaknesses.append("developer: insufficient code_changes breadth for realistic starter implementation.")
+                if len(tests) < 3:
+                    weaknesses.append("developer: insufficient test depth.")
+                if code_changes:
+                    strengths.append("developer: emitted concrete file-level code changes.")
+            if agent == "qa" and structured:
+                if not structured.get("test_reports"):
+                    weaknesses.append("qa: missing test_reports and execution evidence.")
+                if not structured.get("findings"):
+                    weaknesses.append("qa: no findings matrix produced; quality assessment is superficial.")
+            if agent == "docs" and structured:
+                docs = structured.get("documents", [])
+                if not docs:
+                    weaknesses.append("docs: no structured documentation package entries were generated.")
+
+        completeness_values = [value for key, value in metrics.items() if key.endswith("_completeness")]
+        implementation_depth = sum(completeness_values) / max(1, len(completeness_values))
+        metrics["implementation_depth"] = round(implementation_depth, 2)
+        metrics["runnable_project_readiness"] = round(max(0.0, implementation_depth - 15.0), 2)
+        return {
+            "strengths": strengths[:12],
+            "weaknesses": weaknesses[:24],
+            "metrics": metrics,
+        }
+
+    def _build_quality_report_markdown(self, summary: dict[str, Any], source_root: Path) -> str:
+        metrics = summary["metrics"]
+        strengths = summary["strengths"]
+        weaknesses = summary["weaknesses"]
+        lines = [
+            "# Delivery Quality Report",
+            "",
+            f"Source artifacts: `{source_root}`",
+            "",
+            "## Strengths",
+        ]
+        lines.extend(f"- {item}" for item in (strengths or ["No major strengths detected."]))
+        lines.extend(["", "## Weaknesses"])
+        lines.extend(f"- {item}" for item in (weaknesses or ["No major weaknesses detected."]))
+        lines.extend(
+            [
+                "",
+                "## Delivery Metrics",
+                "",
+                f"- Implementation depth score: **{metrics.get('implementation_depth', 0):.2f}/100**",
+                f"- Runnable project readiness: **{metrics.get('runnable_project_readiness', 0):.2f}/100**",
+                "",
+                "## Agent Completeness",
+            ]
+        )
+        for key, value in metrics.items():
+            if key.endswith("_completeness"):
+                lines.append(f"- {key}: {value:.2f}")
+        lines.extend(
+            [
+                "",
+                "## Missing Deliverables",
+                "- Rich backend API contracts and service/repository logic.",
+                "- Deeper QA evidence (test plan, coverage and edge-case matrix).",
+                "- Production-grade documentation pack with setup/deployment/troubleshooting.",
+                "- Architecture package with diagrams, DB design, observability and deployment plan.",
+                "",
+                "## Recommendations",
+                "- Enable multi-pass developer generation to separate scaffolding, implementation, hardening and tests.",
+                "- Increase agent-specific output contracts toward file bundles instead of summary-only JSON.",
+                "- Apply quality-rule warnings for placeholder density, missing validations, and missing test evidence.",
+            ]
+        )
+        return "\n".join(lines) + "\n"
+
+    def _read_structured_json(self, source_root: Path, agent: str) -> dict[str, Any]:
+        path = source_root / agent / "structured_output.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+        except json.JSONDecodeError:
+            return {}
+
+    def _write_ba_improvement_docs(self, source_root: Path, improvements_root: Path) -> None:
+        ba = self._read_structured_json(source_root, "ba")
+        target = improvements_root / "ba"
+        target.mkdir(parents=True, exist_ok=True)
+        stories = ba.get("user_stories", []) if isinstance(ba, dict) else []
+        requirement = str(ba.get("normalized_requirement", "")).strip() if isinstance(ba, dict) else ""
+        functional_spec = [
+            "# Functional Specification",
+            "",
+            "## Executive Summary",
+            requirement or "MVP e-commerce platform with products, users, and shopping cart.",
+            "",
+            "## Scope",
+            "- Product catalog browsing",
+            "- User registration/authentication",
+            "- Shopping cart management",
+            "",
+            "## Functional Requirements",
+            "- FR-1: List products with pagination/search filters.",
+            "- FR-2: Register/login users and persist session.",
+            "- FR-3: Add/update/remove cart items and compute totals.",
+            "",
+            "## Non-Functional Requirements",
+            "- API response time under 500ms in local dev for core endpoints.",
+            "- Input validation and explicit error contracts for all write operations.",
+            "- Observability logs for critical user and cart flows.",
+            "",
+            "## User Stories",
+        ]
+        if stories:
+            for index, story in enumerate(stories[:5], start=1):
+                functional_spec.append(f"- US-{index}: {story.get('narrative') or story.get('title')}")
+        else:
+            functional_spec.extend(
+                [
+                    "- As a buyer, I want to browse products and see prices/stock.",
+                    "- As a buyer, I want to manage my cart before checkout.",
+                    "- As a user, I want account-based cart persistence.",
+                ]
+            )
+        (target / "functional_specification.md").write_text("\n".join(functional_spec) + "\n", encoding="utf-8")
+        (target / "business_rules.md").write_text(
+            "\n".join(
+                [
+                    "# Business Rules",
+                    "",
+                    "- BR-1: Cart quantity cannot exceed available inventory.",
+                    "- BR-2: Product price used in cart is snapshotted at add-to-cart time.",
+                    "- BR-3: Only authenticated users can persist carts.",
+                    "- BR-4: Soft-delete products should not be purchasable.",
+                    "- BR-5: Currency and tax calculations are deterministic and auditable.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (target / "requirements_matrix.md").write_text(
+            "\n".join(
+                [
+                    "# Requirements Matrix",
+                    "",
+                    "| Requirement | Story | Acceptance Owner | Priority |",
+                    "|---|---|---|---|",
+                    "| FR-1 Product listing | US-1 | BA | High |",
+                    "| FR-2 User auth | US-2 | BA | High |",
+                    "| FR-3 Cart management | US-3 | BA | High |",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (target / "acceptance_criteria.md").write_text(
+            "\n".join(
+                [
+                    "# Acceptance Criteria",
+                    "",
+                    "## Product Listing",
+                    "- Given products exist, when listing endpoint is called, then paginated items are returned.",
+                    "## User Auth",
+                    "- Given valid credentials, when login is requested, then token/session is returned.",
+                    "## Cart",
+                    "- Given product in stock, when add-to-cart is executed, then quantity and totals are updated.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def _write_architect_improvement_docs(self, source_root: Path, improvements_root: Path) -> None:
+        target = improvements_root / "architect"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "architecture.md").write_text(
+            "\n".join(
+                [
+                    "# Architecture",
+                    "",
+                    "## Layered Design",
+                    "- API Layer: controllers/routers + DTO validation",
+                    "- Application Layer: use-cases and orchestration",
+                    "- Domain Layer: entities, policies, business rules",
+                    "- Infrastructure Layer: repositories, DB adapters, external clients",
+                    "",
+                    "## Module Boundaries",
+                    "- catalog, users, cart, auth, observability",
+                    "",
+                    "## AuthZ/AuthN Strategy",
+                    "- JWT/session auth, role guards, policy-based access checks",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (target / "api_contracts.md").write_text(
+            "\n".join(
+                [
+                    "# API Contracts",
+                    "",
+                    "- `GET /api/products` -> list products with filters/pagination.",
+                    "- `POST /api/users/register` -> register user.",
+                    "- `POST /api/auth/login` -> authenticate user.",
+                    "- `GET /api/cart` -> retrieve current user cart.",
+                    "- `POST /api/cart/items` -> add item to cart.",
+                    "- `PATCH /api/cart/items/{id}` -> update quantity.",
+                    "- `DELETE /api/cart/items/{id}` -> remove item.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (target / "database_design.md").write_text(
+            "\n".join(
+                [
+                    "# Database Design",
+                    "",
+                    "- `users(id, email, password_hash, role, created_at)`",
+                    "- `products(id, sku, title, description, price, stock, status)`",
+                    "- `carts(id, user_id, status, updated_at)`",
+                    "- `cart_items(id, cart_id, product_id, qty, unit_price)`",
+                    "- Foreign keys and unique indexes on SKU/email.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (target / "deployment_architecture.md").write_text(
+            "# Deployment Architecture\n\nDockerized frontend + backend + database + reverse proxy.\n",
+            encoding="utf-8",
+        )
+        (target / "observability_plan.md").write_text(
+            "# Observability Plan\n\nStructured logs, request tracing IDs, latency/error metrics per endpoint.\n",
+            encoding="utf-8",
+        )
+        diagrams = target / "diagrams"
+        diagrams.mkdir(parents=True, exist_ok=True)
+        (diagrams / "service_flow.mmd").write_text(
+            "flowchart LR\nClient --> API\nAPI --> App\nApp --> Domain\nApp --> Repo\nRepo --> DB\n",
+            encoding="utf-8",
+        )
+
+    def _write_developer_improvement_docs(self, source_root: Path, improvements_root: Path) -> None:
+        target = improvements_root / "developer"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "multi_pass_plan.md").write_text(
+            "\n".join(
+                [
+                    "# Multi-Pass Development Plan",
+                    "",
+                    "1. Pass 1 - Scaffold architecture and contracts.",
+                    "2. Pass 2 - Implement core product/user/cart functionality.",
+                    "3. Pass 3 - Add validations and robust error handling.",
+                    "4. Pass 4 - Refactor for modularity and maintainability.",
+                    "5. Pass 5 - Generate unit/integration tests.",
+                    "6. Pass 6 - Produce technical documentation updates.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (target / "backend_depth_requirements.md").write_text(
+            "\n".join(
+                [
+                    "# Backend Depth Requirements",
+                    "",
+                    "- Controllers + DTO validation per endpoint.",
+                    "- Service layer with business rules (stock, user/cart ownership).",
+                    "- Repository layer abstractions and persistence adapters.",
+                    "- Error taxonomy + HTTP mapping + structured logging.",
+                    "- Auth middleware and permission checks.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (target / "frontend_depth_requirements.md").write_text(
+            "\n".join(
+                [
+                    "# Frontend Depth Requirements",
+                    "",
+                    "- Route-level screens (catalog, product detail, auth, cart).",
+                    "- Reusable components and design tokens.",
+                    "- Form validation and async loading/error states.",
+                    "- API client integration and state handling.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def _write_qa_improvement_docs(self, source_root: Path, improvements_root: Path) -> None:
+        target = improvements_root / "qa"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "qa_report.md").write_text(
+            "# QA Report\n\nCurrent QA output is superficial. Add API, UI, and edge-case evidence.\n",
+            encoding="utf-8",
+        )
+        (target / "test_plan.md").write_text(
+            "# Test Plan\n\nCover product listing, auth, cart workflows, and failure modes.\n",
+            encoding="utf-8",
+        )
+        (target / "test_cases.md").write_text(
+            "# Test Cases\n\n- Catalog filtering\n- Login failure\n- Cart stock validation\n",
+            encoding="utf-8",
+        )
+        (target / "regression_scenarios.md").write_text(
+            "# Regression Scenarios\n\nInclude user/cart state consistency and API contract regressions.\n",
+            encoding="utf-8",
+        )
+        (target / "edge_case_matrix.md").write_text(
+            "# Edge Case Matrix\n\nDocument empty carts, invalid product IDs, stock depletion, and concurrent updates.\n",
+            encoding="utf-8",
+        )
+        (target / "coverage_summary.md").write_text(
+            "# Coverage Summary\n\nRequire minimum coverage thresholds for critical flows.\n",
+            encoding="utf-8",
+        )
+        (target / "api_tests").mkdir(parents=True, exist_ok=True)
+        (target / "playwright_tests").mkdir(parents=True, exist_ok=True)
+
+    def _write_docs_improvement_docs(self, source_root: Path, improvements_root: Path) -> None:
+        target = improvements_root / "docs"
+        target.mkdir(parents=True, exist_ok=True)
+        for name, content in (
+            ("README.md", "# README\n\nProject overview and quickstart.\n"),
+            ("setup_guide.md", "# Setup Guide\n\nEnvironment setup, variables, and startup commands.\n"),
+            ("deployment_guide.md", "# Deployment Guide\n\nContainer build/deploy steps.\n"),
+            ("api_documentation.md", "# API Documentation\n\nEndpoint contracts and error schemas.\n"),
+            ("architecture_overview.md", "# Architecture Overview\n\nLayers, modules, and key flows.\n"),
+            ("troubleshooting.md", "# Troubleshooting\n\nCommon startup/runtime issues and fixes.\n"),
+            ("onboarding_guide.md", "# Onboarding Guide\n\nHow new contributors run and extend the project.\n"),
+        ):
+            (target / name).write_text(content, encoding="utf-8")
 
     async def get_workflow_telemetry(self, workflow_id: UUID) -> WorkflowTelemetryResponse:
         """Build a live visualization snapshot for a workflow."""

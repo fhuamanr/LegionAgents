@@ -37,6 +37,7 @@ dist/
 
 # Runtime outputs and generated evidence
 outputs/
+data/
 screenshots/
 videos/
 traces/

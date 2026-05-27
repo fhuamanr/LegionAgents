@@ -148,10 +148,8 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
         )
         prompt_messages = await self._prompt_builder.build(runtime_context)
         runtime_context = runtime_context.model_copy(update={"prompt_messages": prompt_messages})
-
-        raw_output = await self.invoke(runtime_context)
+        structured_output, raw_output = await self._run_multipass_development(runtime_context, request)
         await self._enforce_governance_output(runtime_context, raw_output)
-        structured_output = await self._output_validator.validate(raw_output)
         await self._enforce_governance_output(runtime_context, raw_output, structured_output)
         if not isinstance(structured_output, DeveloperOutput):
             raise TypeError("Developer runtime must return DeveloperOutput.")
@@ -172,10 +170,104 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
                 "context_document_count": agent_context.metadata.get("document_count", 0),
                 "context_engineering": agent_context.metadata.get("context_engineering", {}),
                 "structured_output": structured_output.model_dump(mode="json"),
+                "raw_output": raw_output,
                 **self.result_metadata(structured_output),
                 **self._repository_metadata(repository_result),
             },
         )
+
+    async def _run_multipass_development(
+        self,
+        runtime_context: RuntimeExecutionContext,
+        request: AgentExecutionRequest,
+    ) -> tuple[DeveloperOutput, str]:
+        local_safe_mode = bool(request.metadata.get("local_lm_studio_safe_mode", False))
+        configured_passes = int(request.metadata.get("developer_passes", 6))
+        pass_count = max(1, min(configured_passes, 6 if not local_safe_mode else 2))
+        phases = (
+            "Pass 1: scaffold modules and contracts.",
+            "Pass 2: implement core business functionality.",
+            "Pass 3: add validations and error handling.",
+            "Pass 4: improve/refactor design quality.",
+            "Pass 5: generate/expand tests.",
+            "Pass 6: provide documentation-facing technical notes.",
+        )
+        merged_payload: dict[str, Any] = {}
+        all_raw_outputs: list[str] = []
+        for index in range(pass_count):
+            phase = phases[index]
+            user_prompt = runtime_context.prompt_messages[1].content + f"\n\n# Development Phase\n{phase}\n"
+            if merged_payload:
+                user_prompt += (
+                    "\n# Previous Pass Summary (carry forward and improve)\n"
+                    + json.dumps(
+                        {
+                            "summary": merged_payload.get("summary"),
+                            "code_changes": merged_payload.get("code_changes", [])[:3],
+                            "tests": merged_payload.get("tests", [])[:3],
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            phase_context = runtime_context.model_copy(
+                update={
+                    "prompt_messages": (
+                        runtime_context.prompt_messages[0],
+                        runtime_context.prompt_messages[1].model_copy(update={"content": user_prompt}),
+                    )
+                }
+            )
+            phase_raw = await self.invoke(phase_context)
+            all_raw_outputs.append(phase_raw)
+            phase_structured = await self._output_validator.validate(phase_raw, strategy="developer_sections")
+            if not isinstance(phase_structured, DeveloperOutput):
+                continue
+            merged_payload = self._merge_developer_outputs(merged_payload, phase_structured.model_dump(mode="json"))
+        if not merged_payload:
+            fallback = await self._output_validator.validate(all_raw_outputs[-1] if all_raw_outputs else "", strategy="developer_sections")
+            assert isinstance(fallback, DeveloperOutput)
+            return fallback, "\n\n".join(all_raw_outputs)
+        merged_structured = DeveloperOutput.model_validate(merged_payload)
+        return merged_structured, "\n\n".join(all_raw_outputs)
+
+    def _merge_developer_outputs(self, base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(base) if base else {}
+        if not merged.get("agent_name"):
+            merged["agent_name"] = "developer"
+        summary = str(incoming.get("summary", "")).strip()
+        if summary:
+            merged["summary"] = summary
+        merged.setdefault("code_changes", [])
+        merged.setdefault("tests", [])
+        existing_code_paths = {
+            str(item.get("path"))
+            for item in merged["code_changes"]
+            if isinstance(item, dict)
+        }
+        for item in incoming.get("code_changes", []):
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path", ""))
+            if path in existing_code_paths:
+                continue
+            merged["code_changes"].append(item)
+            existing_code_paths.add(path)
+        existing_test_paths = {
+            str(item.get("path"))
+            for item in merged["tests"]
+            if isinstance(item, dict)
+        }
+        for item in incoming.get("tests", []):
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path", ""))
+            if path in existing_test_paths:
+                continue
+            merged["tests"].append(item)
+            existing_test_paths.add(path)
+        merged["code_changes"] = merged["code_changes"][:8]
+        merged["tests"] = merged["tests"][:8]
+        return merged
 
     async def _execute_repository_changes(
         self,
@@ -318,10 +410,11 @@ def build_llm_agent_runtimes(
             BARequirementsOutput,
             ArtifactKind.REQUIREMENTS,
             (
-                "ONLY convert the request into concise business analysis JSON.",
+                "Deliver rich business analysis with scope, executive summary, business rules, and functional flows.",
                 "Return only final JSON. Do not include reasoning.",
                 "Limit user_stories to 3-5 items.",
                 "Limit acceptance_criteria to max 4 per story.",
+                "Include realistic edge cases, permissions/roles, assumptions, and risks.",
                 "Do not include architecture, implementation, QA, docs, or PR details.",
             ),
         ),
@@ -330,21 +423,29 @@ def build_llm_agent_runtimes(
             "software architect",
             ArchitectOutput,
             ArtifactKind.ARCHITECTURE,
-            ("Produce architecture decisions and constraints only.",),
+            (
+                "Produce detailed architecture decisions with module boundaries, API contracts, and deployment/observability considerations.",
+                "Include constraints, tradeoffs, and scalability implications.",
+            ),
         ),
         (
             "qa",
             "quality engineer",
             QAOutput,
             ArtifactKind.TEST_REPORT,
-            ("Validate upstream implementation artifacts and emit QA evidence only.",),
+            (
+                "Validate implementation deeply: frontend behavior, APIs, edge cases, and failure scenarios.",
+                "Emit actionable QA evidence, findings, and test reports instead of high-level summary only.",
+            ),
         ),
         (
             "docs",
             "technical writer",
             DocsOutput,
             ArtifactKind.DOCUMENTATION,
-            ("Produce documentation deliverables only after QA context is available.",),
+            (
+                "Produce production-style docs package: setup, deployment, architecture overview, API docs, troubleshooting, onboarding.",
+            ),
         ),
         (
             "pr",
@@ -391,6 +492,8 @@ def build_llm_agent_runtimes(
                 "Produce concrete file contents for every code change and generated test.",
                 "Use code_changes[].content and tests[].content so the repository engine can modify real files.",
                 "Preserve architecture, standards, naming, testing, and security rules loaded from markdown.",
+                "Cover frontend and backend depth (controllers/services/repositories/DTOs/validation/error handling/auth scaffolding).",
+                "Avoid placeholder TODO-only implementations and empty methods.",
             ),
             metadata={"output_json_schema": json.dumps(DeveloperOutput.model_json_schema(), indent=2)},
         ),

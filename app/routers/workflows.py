@@ -6,7 +6,14 @@ from fastapi import APIRouter, Depends
 from fastapi import HTTPException
 
 from app.dependencies.container import get_execution_service
-from app.schemas import TriggerWorkflowRequest, WorkflowArtifactListResponse, WorkflowArtifactFile, WorkflowResponse
+from app.schemas import (
+    ImproveExecutionRequest,
+    ImproveExecutionResponse,
+    TriggerWorkflowRequest,
+    WorkflowArtifactFile,
+    WorkflowArtifactListResponse,
+    WorkflowResponse,
+)
 from app.services.execution_service import ExecutionService
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -64,4 +71,13 @@ async def read_workflow_agent_artifact(
         return await service.read_workflow_artifact(workflow_id, agent_name, artifact_name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Artifact not found.") from exc
+
+
+@router.post("/{workflow_id}/improve", response_model=ImproveExecutionResponse)
+async def improve_existing_execution(
+    workflow_id: UUID,
+    request: ImproveExecutionRequest,
+    service: ExecutionService = Depends(get_execution_service),
+) -> ImproveExecutionResponse:
+    return await service.improve_existing_execution(workflow_id, request)
 

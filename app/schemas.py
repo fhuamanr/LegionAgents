@@ -305,6 +305,21 @@ class WorkflowArtifactListResponse(ApiModel):
     files: tuple[WorkflowArtifactFile, ...] = Field(default_factory=tuple)
 
 
+class ImproveExecutionRequest(ApiModel):
+    artifact_root: str = Field(min_length=1)
+    selected_agents: tuple[str, ...] = Field(default_factory=lambda: ("ba", "architect", "developer", "qa", "docs", "pr"))
+    improvement_depth: str = Field(default="balanced", min_length=1)
+
+
+class ImproveExecutionResponse(ApiModel):
+    workflow_id: UUID
+    improvements_path: str
+    quality_report_path: str
+    quality_metrics: dict[str, float] = Field(default_factory=dict)
+    weaknesses: tuple[str, ...] = Field(default_factory=tuple)
+    strengths: tuple[str, ...] = Field(default_factory=tuple)
+
+
 class StoredUpload(ApiModel):
     upload_id: UUID = Field(default_factory=uuid4)
     title: str
