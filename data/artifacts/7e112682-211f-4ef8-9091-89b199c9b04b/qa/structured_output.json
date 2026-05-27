@@ -1,0 +1,27 @@
+{
+  "id": "58b2bf58-4805-424d-bf43-49552638aa88",
+  "contract_kind": "quality_report",
+  "agent_name": "qa",
+  "summary": "QA output",
+  "trace": {
+    "correlation_id": "4d23f2d2-ccb5-41d0-8b88-5dbc0c53cb20",
+    "causation_id": null,
+    "tenant_id": null,
+    "user_id": null,
+    "tags": [],
+    "attributes": {}
+  },
+  "artifacts": [],
+  "risks": [],
+  "dependencies": [],
+  "metadata": {
+    "raw_output_size": 55
+  },
+  "findings": [],
+  "test_reports": [],
+  "screenshots": [],
+  "execution_logs": [],
+  "bug_summaries": [],
+  "coverage": null,
+  "passed": true
+}

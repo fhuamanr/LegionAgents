@@ -5,7 +5,9 @@ import re
 from typing import Any
 
 from core.governance.models import (
+    GovernanceSeverity,
     GovernancePolicy,
+    GovernanceViolation,
     GovernanceValidationResult,
     RuleCategory,
     RuleEffect,
@@ -52,14 +54,15 @@ class PolicyValidator:
         text: str,
     ) -> GovernanceValidationResult:
         errors: list[str] = []
-        violations = self._forbidden_violations(policy, text)
-        errors.extend(violations)
+        violations = self._forbidden_violations(policy, text, mode="strict")
+        errors.extend(v.reason for v in violations if v.blocking)
         return GovernanceValidationResult(
             valid=not errors,
             errors=tuple(errors),
             metadata={
                 "validated_rule_count": len(policy.rules),
                 "forbidden_violation_count": len(violations),
+                "violations": tuple(v.model_dump(mode="json") for v in violations),
             },
         )
 
@@ -69,11 +72,14 @@ class PolicyValidator:
         agent_name: str,
         raw_output: str,
         structured_output: Any | None = None,
+        enforcement_mode: str = "balanced",
     ) -> GovernanceValidationResult:
         """Validate generated model output against active governance policy."""
 
         output_text = self._output_text(raw_output, structured_output)
-        errors = list(self._forbidden_violations(policy, output_text))
+        mode = enforcement_mode.strip().lower() or "balanced"
+        violations: list[GovernanceViolation] = []
+        violations.extend(self._forbidden_violations(policy, output_text, mode))
         warnings: list[str] = []
         enforced_rules: list[str] = []
 
@@ -85,10 +91,25 @@ class PolicyValidator:
                 continue
             enforced_rules.append(rule.id)
             if not self._required_check_passes(check, agent_name, output_text, structured_output):
-                errors.append(f"Generated output violates required governance rule {rule.id}: {rule.description}")
+                violation = GovernanceViolation(
+                    rule_id=rule.id,
+                    severity=rule.severity,
+                    evidence=self._best_evidence(output_text),
+                    matched_text=self._best_evidence(output_text),
+                    reason=f"Generated output violates required governance rule {rule.id}: {rule.description}",
+                    suggested_fix="Adjust output to satisfy the required governance constraint.",
+                    blocking=self._is_blocking(rule.severity, mode),
+                )
+                violations.append(violation)
+                if not violation.blocking:
+                    warnings.append(violation.reason)
 
-        architecture_errors = self._architecture_violations(policy, agent_name, output_text, structured_output)
-        errors.extend(architecture_errors)
+        architecture_violations = self._architecture_violations(
+            policy, agent_name, output_text, structured_output, mode
+        )
+        violations.extend(architecture_violations)
+        warnings.extend(v.reason for v in architecture_violations if not v.blocking)
+        errors = [v.reason for v in violations if v.blocking]
 
         return GovernanceValidationResult(
             valid=not errors,
@@ -97,20 +118,39 @@ class PolicyValidator:
             metadata={
                 "validated_rule_count": len(policy.rules),
                 "enforced_required_rules": tuple(enforced_rules),
-                "forbidden_violation_count": len(errors) - len(architecture_errors),
-                "architecture_violation_count": len(architecture_errors),
+                "forbidden_violation_count": len(
+                    tuple(v for v in violations if "Runtime text violates" in v.reason)
+                ),
+                "architecture_violation_count": len(architecture_violations),
+                "enforcement_mode": mode,
+                "violations": tuple(v.model_dump(mode="json") for v in violations),
             },
         )
 
-    def _forbidden_violations(self, policy: GovernancePolicy, text: str) -> list[str]:
-        violations: list[str] = []
+    def _forbidden_violations(
+        self, policy: GovernancePolicy, text: str, mode: str = "balanced"
+    ) -> list[GovernanceViolation]:
+        violations: list[GovernanceViolation] = []
         lowered = text.lower()
         for rule in policy.rules:
             if rule.effect != RuleEffect.FORBID:
                 continue
             for pattern in self._forbidden_patterns(rule.description):
-                if pattern.search(lowered):
-                    violations.append(f"Runtime text violates {rule.id}: matched '{pattern.pattern}'")
+                match = pattern.search(lowered)
+                if match:
+                    matched_text = match.group(0)
+                    reason = f"Runtime text violates {rule.id}: matched '{pattern.pattern}'"
+                    violations.append(
+                        GovernanceViolation(
+                            rule_id=rule.id,
+                            severity=rule.severity,
+                            evidence=matched_text,
+                            matched_text=matched_text,
+                            reason=reason,
+                            suggested_fix="Remove forbidden content and follow policy guidance.",
+                            blocking=self._is_blocking(rule.severity, mode),
+                        )
+                    )
         return violations
 
     def _forbidden_patterns(self, description: str) -> tuple[re.Pattern[str], ...]:
@@ -211,25 +251,70 @@ class PolicyValidator:
         agent_name: str,
         output_text: str,
         structured_output: Any | None,
-    ) -> list[str]:
+        mode: str = "balanced",
+    ) -> list[GovernanceViolation]:
         if not any(rule.category == RuleCategory.ARCHITECTURE for rule in policy.rules):
             return []
         if agent_name != "developer" or structured_output is None:
             return []
 
-        errors: list[str] = []
+        architecture_rule = next(
+            (rule for rule in policy.rules if rule.id == "global.architecture.clean-boundaries"),
+            None,
+        )
+        rule_id = architecture_rule.id if architecture_rule else "global.architecture.clean-boundaries"
+        severity = architecture_rule.severity if architecture_rule else GovernanceSeverity.NEEDS_REVIEW
+
+        errors: list[GovernanceViolation] = []
         code_changes = tuple(getattr(structured_output, "code_changes", tuple()) or tuple())
         for change in code_changes:
             path = str(getattr(change, "path", "")).lower()
             content = str(getattr(change, "content", "") or "").lower()
             combined = f"{path}\n{content}"
             if "controller" in path and re.search(r"\b(select\s+\*|repository|business|domain service)\b", content):
+                reason = (
+                    "Generated output violates architecture governance: controller changes contain "
+                    "business, repository, or inline SQL logic."
+                )
                 errors.append(
-                    "Generated output violates architecture governance: controller changes contain business, repository, or inline SQL logic."
+                    GovernanceViolation(
+                        rule_id=rule_id,
+                        severity=severity,
+                        evidence=f"path={path}",
+                        matched_text=self._best_evidence(content),
+                        reason=reason,
+                        suggested_fix="Move orchestration/domain logic to use cases/services and keep controllers thin.",
+                        blocking=self._is_blocking(severity, mode),
+                    )
                 )
             if re.search(r"\bselect\s+\*\s+from\b", combined):
-                errors.append("Generated output violates architecture governance: inline SQL detected in code changes.")
+                reason = "Generated output violates architecture governance: inline SQL detected in code changes."
+                errors.append(
+                    GovernanceViolation(
+                        rule_id=rule_id,
+                        severity=severity,
+                        evidence=self._best_evidence(combined),
+                        matched_text="select * from",
+                        reason=reason,
+                        suggested_fix="Move data access into repository/infrastructure boundaries.",
+                        blocking=self._is_blocking(severity, mode),
+                    )
+                )
         return errors
+
+    def _is_blocking(self, severity: GovernanceSeverity, mode: str) -> bool:
+        normalized = mode.strip().lower() if mode else "balanced"
+        if normalized == "advisory":
+            return False
+        if normalized == "strict":
+            return self._severity_rank[severity] >= self._severity_rank[GovernanceSeverity.NEEDS_REVIEW]
+        return self._severity_rank[severity] >= self._severity_rank[GovernanceSeverity.BLOCKING]
+
+    def _best_evidence(self, text: str, max_chars: int = 200) -> str:
+        value = (text or "").strip().replace("\n", " ")
+        if len(value) <= max_chars:
+            return value
+        return value[: max_chars - 3] + "..."
 
     def _output_text(self, raw_output: str, structured_output: Any | None) -> str:
         if structured_output is None:
@@ -250,3 +335,9 @@ class PolicyValidator:
             parts.append(str(getattr(work_item, "description", "")))
         return "\n".join(parts)
 
+    _severity_rank = {
+        GovernanceSeverity.INFO: 0,
+        GovernanceSeverity.WARNING: 1,
+        GovernanceSeverity.NEEDS_REVIEW: 2,
+        GovernanceSeverity.BLOCKING: 3,
+    }

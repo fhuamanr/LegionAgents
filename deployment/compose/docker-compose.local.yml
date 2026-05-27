@@ -10,12 +10,14 @@ services:
     environment:
       APP_ENV: local
       STORAGE_ROOT: /app/outputs
+      ARTIFACT_ROOT: /app/data/artifacts
       REDIS_URL: redis://redis:6379/0
       POSTGRES_DSN: postgresql://platform:platform@postgres:5432/platform
     ports:
       - "8000:8000"
     volumes:
       - ../../outputs:/app/outputs
+      - ../../data/artifacts:/app/data/artifacts
       - ../../agents:/app/agents:ro
       - ../../repository:/app/repository:ro
 

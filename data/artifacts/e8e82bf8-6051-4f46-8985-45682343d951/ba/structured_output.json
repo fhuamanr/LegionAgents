@@ -1,0 +1,21 @@
+{
+  "id": "e0b181d9-6ca1-4fa0-a486-3ca84b5afdfa",
+  "contract_kind": "ba_requirements",
+  "agent_name": "ba",
+  "summary": "BA requirements extracted.",
+  "trace": {
+    "correlation_id": "620d43f5-f204-4920-bdb5-272d4a96bdd1",
+    "causation_id": null,
+    "tenant_id": null,
+    "user_id": null,
+    "tags": [],
+    "attributes": {}
+  },
+  "artifacts": [],
+  "risks": [],
+  "dependencies": [],
+  "metadata": {},
+  "normalized_requirement": "",
+  "user_stories": [],
+  "assumptions": []
+}

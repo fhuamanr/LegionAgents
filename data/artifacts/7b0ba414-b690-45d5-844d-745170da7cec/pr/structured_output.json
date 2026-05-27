@@ -1,0 +1,22 @@
+{
+  "id": "2378c2a9-6346-45a9-a108-89a7e926c3d5",
+  "contract_kind": "pull_request_package",
+  "agent_name": "pr",
+  "summary": "PR output",
+  "trace": {
+    "correlation_id": "12f37c2e-f5ed-4615-a94a-a1da23dc7963",
+    "causation_id": null,
+    "tenant_id": null,
+    "user_id": null,
+    "tags": [],
+    "attributes": {}
+  },
+  "artifacts": [],
+  "risks": [],
+  "dependencies": [],
+  "metadata": {},
+  "title": "Runtime PR",
+  "description": "Executable workflow",
+  "target_branch": "main",
+  "source_branch": "codex/runtime"
+}

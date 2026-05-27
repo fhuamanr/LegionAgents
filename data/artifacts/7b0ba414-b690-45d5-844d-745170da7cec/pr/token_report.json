@@ -1,0 +1,16 @@
+{
+  "prompt_tokens": 236,
+  "output_tokens": 38,
+  "duration_seconds": 0.0,
+  "validation": {
+    "json_extracted": false,
+    "json_repaired": false,
+    "fields_removed": [],
+    "normalized_fields": [],
+    "normalization_applied": false,
+    "sanitization_applied": false,
+    "validation_result": "ok",
+    "raw_output_size": 153,
+    "schema_name": "PullRequestOutput"
+  }
+}

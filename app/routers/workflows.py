@@ -3,9 +3,10 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from fastapi import HTTPException
 
 from app.dependencies.container import get_execution_service
-from app.schemas import TriggerWorkflowRequest, WorkflowResponse
+from app.schemas import TriggerWorkflowRequest, WorkflowArtifactListResponse, WorkflowArtifactFile, WorkflowResponse
 from app.services.execution_service import ExecutionService
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -33,4 +34,34 @@ async def get_workflow(
     service: ExecutionService = Depends(get_execution_service),
 ) -> WorkflowResponse:
     return await service.get_workflow(workflow_id)
+
+
+@router.get("/{workflow_id}/artifacts", response_model=WorkflowArtifactListResponse)
+async def list_workflow_artifacts(
+    workflow_id: UUID,
+    service: ExecutionService = Depends(get_execution_service),
+) -> WorkflowArtifactListResponse:
+    return await service.list_workflow_artifacts(workflow_id)
+
+
+@router.get("/{workflow_id}/artifacts/{agent_name}", response_model=WorkflowArtifactListResponse)
+async def list_workflow_agent_artifacts(
+    workflow_id: UUID,
+    agent_name: str,
+    service: ExecutionService = Depends(get_execution_service),
+) -> WorkflowArtifactListResponse:
+    return await service.list_workflow_artifacts(workflow_id, agent_name=agent_name)
+
+
+@router.get("/{workflow_id}/artifacts/{agent_name}/{artifact_name:path}", response_model=WorkflowArtifactFile)
+async def read_workflow_agent_artifact(
+    workflow_id: UUID,
+    agent_name: str,
+    artifact_name: str,
+    service: ExecutionService = Depends(get_execution_service),
+) -> WorkflowArtifactFile:
+    try:
+        return await service.read_workflow_artifact(workflow_id, agent_name, artifact_name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Artifact not found.") from exc
 

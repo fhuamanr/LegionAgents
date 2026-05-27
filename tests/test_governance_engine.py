@@ -5,6 +5,7 @@ import pytest
 from core.governance import (
     AgentGovernanceEngine,
     AgentPolicyMerger,
+    GovernanceSeverity,
     GovernancePolicy,
     GovernanceRule,
     MarkdownPolicyLoader,
@@ -13,6 +14,8 @@ from core.governance import (
     RulePriority,
     RuleSource,
 )
+from core.governance.defaults import build_default_global_policy
+from core.governance.validator import PolicyValidator
 from core.contracts.outputs import CodeChangeProposal, DeveloperOutput, TestGenerationProposal
 
 
@@ -188,3 +191,66 @@ async def test_governance_engine_rejects_forbidden_inline_sql_in_generated_outpu
 
     assert result.valid is False
     assert any("inline SQL" in error or "select" in error for error in result.errors)
+
+
+def test_clean_boundaries_default_severity_is_needs_review() -> None:
+    policy = build_default_global_policy()
+    rule = next(rule for rule in policy.rules if rule.id == "global.architecture.clean-boundaries")
+    assert rule.severity == GovernanceSeverity.NEEDS_REVIEW
+
+
+def test_non_blocking_governance_issue_is_warning_in_balanced_mode() -> None:
+    validator = PolicyValidator()
+    policy = GovernancePolicy(
+        name="runtime",
+        scope="architect",
+        rules=(
+            GovernanceRule(
+                id="global.architecture.clean-boundaries",
+                description="Preserve Clean Architecture boundaries and keep orchestration separate from business logic.",
+                effect=RuleEffect.REQUIRE,
+                category=RuleCategory.ARCHITECTURE,
+                severity=GovernanceSeverity.NEEDS_REVIEW,
+            ),
+        ),
+    )
+
+    result = validator.validate_generated_output(
+        policy=policy,
+        agent_name="architect",
+        raw_output="controller includes business logic and repository calls",
+        structured_output=None,
+        enforcement_mode="balanced",
+    )
+
+    assert result.valid is True
+    assert not result.errors
+    assert result.warnings
+
+
+def test_clean_boundaries_can_block_in_strict_mode() -> None:
+    validator = PolicyValidator()
+    policy = GovernancePolicy(
+        name="runtime",
+        scope="architect",
+        rules=(
+            GovernanceRule(
+                id="global.architecture.clean-boundaries",
+                description="Preserve Clean Architecture boundaries and keep orchestration separate from business logic.",
+                effect=RuleEffect.REQUIRE,
+                category=RuleCategory.ARCHITECTURE,
+                severity=GovernanceSeverity.NEEDS_REVIEW,
+            ),
+        ),
+    )
+
+    result = validator.validate_generated_output(
+        policy=policy,
+        agent_name="architect",
+        raw_output="controller routes contain business logic and repository access",
+        structured_output=None,
+        enforcement_mode="strict",
+    )
+
+    assert result.valid is False
+    assert result.errors

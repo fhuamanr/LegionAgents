@@ -1,0 +1,20 @@
+{
+  "prompt_tokens": 186,
+  "output_tokens": 524,
+  "duration_seconds": 76.039,
+  "validation": {
+    "json_extracted": false,
+    "json_repaired": false,
+    "fields_removed": [
+      "normalized_requirement",
+      "user_stories",
+      "assumptions"
+    ],
+    "normalized_fields": [],
+    "normalization_applied": false,
+    "sanitization_applied": true,
+    "validation_result": "ok",
+    "raw_output_size": 2098,
+    "schema_name": "ArchitectOutput"
+  }
+}

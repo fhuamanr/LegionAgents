@@ -1,0 +1,19 @@
+{
+  "id": "3bf4c5b6-ca61-425e-8539-5eaa4cd47875",
+  "contract_kind": "architecture_decision",
+  "agent_name": "ba",
+  "summary": "BA requirements extracted.",
+  "trace": {
+    "correlation_id": "938bad36-b030-43b3-9555-0a1bf809796c",
+    "causation_id": null,
+    "tenant_id": null,
+    "user_id": null,
+    "tags": [],
+    "attributes": {}
+  },
+  "artifacts": [],
+  "risks": [],
+  "dependencies": [],
+  "metadata": {},
+  "decisions": []
+}

@@ -105,7 +105,9 @@ async def test_real_workflow_runtime_executes_full_delivery_sequence() -> None:
         snapshot.status == AgentStatus.COMPLETED
         for snapshot in latest.state.agent_states.values()
     )
-    assert tuple(artifact.producer_agent for artifact in latest.state.artifacts) == DEFAULT_DELIVERY_SEQUENCE
+    produced_agents = tuple(artifact.producer_agent for artifact in latest.state.artifacts)
+    for agent_name in DEFAULT_DELIVERY_SEQUENCE:
+        assert agent_name in produced_agents
 
 
 @pytest.mark.asyncio

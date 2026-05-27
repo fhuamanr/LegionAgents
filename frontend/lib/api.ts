@@ -66,6 +66,34 @@ export async function getWorkflowTelemetry(workflowId: string): Promise<Workflow
   }
 }
 
+export async function getWorkflowArtifacts(workflowId: string): Promise<readonly {
+  name: string;
+  agentName: string;
+  relativePath: string;
+  absolutePath: string;
+  sizeBytes: number;
+  createdAt: string;
+  preview: string;
+}[]> {
+  if (!resolvedApiBaseUrl()) {
+    return [];
+  }
+  try {
+    const response = await requestJson<{ workflow_id: string; files: readonly Record<string, unknown>[] }>(`/workflows/${workflowId}/artifacts`);
+    return response.files.map((item) => ({
+      name: String(item.name ?? ""),
+      agentName: String(item.agent_name ?? ""),
+      relativePath: String(item.relative_path ?? ""),
+      absolutePath: String(item.absolute_path ?? ""),
+      sizeBytes: Number(item.size_bytes ?? 0),
+      createdAt: String(item.created_at ?? ""),
+      preview: String(item.preview ?? ""),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function getProviderManagementSnapshot(): Promise<{
   providers: readonly LlmProviderSummary[];
   checks: readonly LlmProviderHealthCheck[];

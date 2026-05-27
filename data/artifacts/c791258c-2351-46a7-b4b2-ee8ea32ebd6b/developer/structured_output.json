@@ -1,0 +1,41 @@
+{
+  "id": "8c06bba3-ad9b-4f85-988f-f512a4e48c5d",
+  "contract_kind": "development_plan",
+  "agent_name": "developer",
+  "summary": "Developer output",
+  "trace": {
+    "correlation_id": "c576367b-5f14-40be-a92a-5b7eebac8496",
+    "causation_id": null,
+    "tenant_id": null,
+    "user_id": null,
+    "tags": [],
+    "attributes": {}
+  },
+  "artifacts": [],
+  "risks": [],
+  "dependencies": [],
+  "metadata": {
+    "handoff": "Developer handoff: implemented src/app.py. Added tests: tests/test_app.py."
+  },
+  "work_items": [],
+  "code_changes": [
+    {
+      "path": "src/app.py",
+      "change_type": "update",
+      "description": "Update app",
+      "content": "def hello() -> str:\n    return \"hello from developer\""
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_app.py",
+      "test_type": "unit",
+      "description": "Test app",
+      "command": null,
+      "content": "from src.app import hello\n\ndef test_hello() -> None:\n    assert hello() == \"hello from developer\""
+    }
+  ],
+  "refactoring_suggestions": [],
+  "commit_message": "Implement developer output",
+  "pr_draft": null
+}

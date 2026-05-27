@@ -1,0 +1,21 @@
+{
+  "prompt_tokens": 316,
+  "output_tokens": 13,
+  "duration_seconds": 0.0,
+  "validation": {
+    "json_extracted": false,
+    "json_repaired": false,
+    "fields_removed": [],
+    "normalized_fields": [
+      "findings",
+      "test_reports",
+      "execution_logs",
+      "bug_summaries"
+    ],
+    "normalization_applied": true,
+    "sanitization_applied": false,
+    "validation_result": "ok",
+    "raw_output_size": 55,
+    "schema_name": "QAOutput"
+  }
+}

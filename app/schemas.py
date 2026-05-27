@@ -290,6 +290,21 @@ class ReportResponse(ApiModel):
     content: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkflowArtifactFile(ApiModel):
+    name: str
+    agent_name: str
+    relative_path: str
+    absolute_path: str
+    size_bytes: int
+    created_at: datetime
+    preview: str = ""
+
+
+class WorkflowArtifactListResponse(ApiModel):
+    workflow_id: UUID
+    files: tuple[WorkflowArtifactFile, ...] = Field(default_factory=tuple)
+
+
 class StoredUpload(ApiModel):
     upload_id: UUID = Field(default_factory=uuid4)
     title: str

@@ -44,6 +44,22 @@ class RuntimePromptBuilder(PromptBuilder):
                     "The JSON object must satisfy the configured output schema.",
                 ]
             )
+            if config.name == "developer":
+                system_sections.extend(
+                    [
+                        "Developer output contract is strict: include agent_name, summary, code_changes, tests.",
+                        "Each code_changes item must include path, change_type, description, content.",
+                        "Each tests item must include path, test_type, description, content.",
+                    ]
+                )
+            if config.name == "qa":
+                system_sections.extend(
+                    [
+                        "QA output contract is strict: include agent_name and summary at minimum.",
+                        "Keep output concise with max 3 findings and max 3 recommendations.",
+                        "Return strict JSON only.",
+                    ]
+                )
         elif parser_strategy == "markdown_sections":
             system_sections.append(
                 "Return compact markdown sections only using the required section headers. No code fences."
@@ -58,6 +74,33 @@ class RuntimePromptBuilder(PromptBuilder):
         schema = config.metadata.get("output_json_schema")
         if schema and require_json and not local_compact_mode:
             user_sections.append(f"# Required JSON Schema\n\n```json\n{schema}\n```")
+        if config.name == "developer":
+            user_sections.append(
+                "# Developer Output Requirements\n\n"
+                "Required minimal JSON shape:\n"
+                '{\n'
+                '  "agent_name": "developer",\n'
+                '  "summary": "Concise summary.",\n'
+                '  "code_changes": [{"path":"src/file.tsx","change_type":"create","description":"...","content":"..."}],\n'
+                '  "tests": [{"path":"src/file.test.tsx","test_type":"unit","description":"...","content":"..."}],\n'
+                '  "handoff": "Short handoff for QA."\n'
+                "}\n"
+                "Local compact mode limits: max 3 code_changes and max 3 tests."
+            )
+        if config.name == "qa":
+            user_sections.append(
+                "# QA Output Requirements\n\n"
+                "Required minimal JSON shape:\n"
+                '{\n'
+                '  "agent_name": "qa",\n'
+                '  "summary": "Short QA evaluation summary.",\n'
+                '  "test_results": [],\n'
+                '  "issues_found": [],\n'
+                '  "recommendations": [],\n'
+                '  "status": "passed"\n'
+                "}\n"
+                "If no tests are available, still provide agent_name and summary."
+            )
 
         governance_text = context.agent_context.metadata.get("governance_text")
         if governance_text and enable_governance:

@@ -97,6 +97,14 @@ def test_upload_trigger_status_logs_and_reports() -> None:
     assert qa_response.json()["kind"] == "qa_report"
     assert docs_response.json()["kind"] == "generated_documentation"
     assert pr_response.json()["kind"] == "pr_summary"
+    artifacts_response = client.get(f"/workflows/{workflow_id}/artifacts")
+    assert artifacts_response.status_code == 200
+    files = artifacts_response.json()["files"]
+    assert any(item["relative_path"].startswith("ba/") for item in files)
+    assert any(item["relative_path"].startswith("architect/") for item in files)
+    assert any(item["relative_path"].startswith("developer/") for item in files)
+    assert any(item["relative_path"].startswith("docs/") for item in files)
+    assert any(item["relative_path"] == "docs/raw_output.md" for item in files)
 
 
 def test_agent_statuses() -> None:

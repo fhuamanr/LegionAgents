@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import json
 from datetime import datetime, timezone
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -26,6 +27,8 @@ from app.schemas import (
     WorkflowTelemetryNode,
     WorkflowTelemetryResponse,
     WorkflowTelemetryTimelineItem,
+    WorkflowArtifactListResponse,
+    WorkflowArtifactFile,
     WorkflowResponse,
     WorkflowStatus,
 )
@@ -94,6 +97,7 @@ class ExecutionService:
         }
         self._ingestion = StoryIngestionPipeline()
         self._upload_root = Path(os.getenv("UPLOAD_ROOT", "outputs/uploads")).resolve()
+        self._artifact_root = Path(os.getenv("ARTIFACT_ROOT", "data/artifacts")).resolve()
         self._local_safe_mode_semaphore = asyncio.Semaphore(1)
         self._playground_artifacts: dict[UUID, list[AgentPlaygroundArtifactSummary]] = {}
         self._context_governor = ContextGovernor()
@@ -245,6 +249,7 @@ class ExecutionService:
                     "execution_id": str(result.execution_id),
                     "checkpoint_count": len(result.checkpoints),
                     "runtime_status": result.status.value,
+                    "artifacts_root": str(self._artifact_root / str(workflow_id)),
                 },
             }
         )
@@ -527,6 +532,60 @@ class ExecutionService:
             events=tuple(event.model_dump(mode="json") for event in events),
         )
 
+    async def list_workflow_artifacts(self, workflow_id: UUID, agent_name: str | None = None) -> WorkflowArtifactListResponse:
+        root = self._artifact_root / str(workflow_id)
+        files: list[WorkflowArtifactFile] = []
+        if not root.exists():
+            return WorkflowArtifactListResponse(workflow_id=workflow_id, files=tuple())
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root).as_posix()
+            parts = rel.split("/", 1)
+            if not parts:
+                continue
+            producer = parts[0]
+            if agent_name and producer != agent_name:
+                continue
+            preview = ""
+            try:
+                preview = path.read_text(encoding="utf-8", errors="ignore")[:2000]
+            except Exception:
+                preview = ""
+            stat = path.stat()
+            files.append(
+                WorkflowArtifactFile(
+                    name=path.name,
+                    agent_name=producer,
+                    relative_path=rel,
+                    absolute_path=str(path),
+                    size_bytes=int(stat.st_size),
+                    created_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+                    preview=preview,
+                )
+            )
+        files.sort(key=lambda item: (item.agent_name, item.relative_path))
+        return WorkflowArtifactListResponse(workflow_id=workflow_id, files=tuple(files))
+
+    async def read_workflow_artifact(self, workflow_id: UUID, agent_name: str, artifact_name: str) -> WorkflowArtifactFile:
+        root = (self._artifact_root / str(workflow_id) / agent_name).resolve()
+        path = (root / artifact_name).resolve()
+        if root not in path.parents and path != root:
+            raise KeyError(str(path))
+        if not path.exists() or not path.is_file():
+            raise KeyError(str(path))
+        stat = path.stat()
+        preview = path.read_text(encoding="utf-8", errors="ignore")[:2000]
+        return WorkflowArtifactFile(
+            name=path.name,
+            agent_name=agent_name,
+            relative_path=f"{agent_name}/{artifact_name}".replace("\\", "/"),
+            absolute_path=str(path),
+            size_bytes=int(stat.st_size),
+            created_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+            preview=preview,
+        )
+
     async def get_workflow_telemetry(self, workflow_id: UUID) -> WorkflowTelemetryResponse:
         """Build a live visualization snapshot for a workflow."""
 
@@ -664,6 +723,8 @@ class ExecutionService:
             )
             if event_name == "agent_completed":
                 await self._emit_generated_output(workflow_id, thread_id, state, agent_name)
+            if event_name in {"agent_completed", "agent_failed"}:
+                await self._persist_agent_artifact_bundle(workflow_id, state, agent_name, event_name)
             if progress_hook is not None:
                 await progress_hook(event)
             if agent_name in self._agent_statuses:
@@ -739,23 +800,109 @@ class ExecutionService:
                     "fields_removed": validation_meta.get("fields_removed", []),
                 },
             )
-        if agent_name == "qa":
-            passed = bool(payload["metadata"].get("passed"))
-            await self.emitter.emit(
-                ExecutionEventType.TELEMETRY_RECORDED,
-                workflow_id=workflow_id,
-                execution_id=state.get("execution_id"),
-                thread_id=thread_id,
-                agent_name=agent_name,
-                message="QA result recorded.",
-                payload={
-                    "qa": {
-                        "passed": passed,
-                        "summary": payload["summary"],
-                        "artifact_count": len(artifacts),
-                    }
-                },
-            )
+
+    async def _persist_agent_artifact_bundle(
+        self,
+        workflow_id: UUID,
+        state: dict[str, Any],
+        agent_name: str,
+        event_name: str,
+    ) -> None:
+        workflow_state = state.get("workflow_state")
+        snapshot = getattr(workflow_state, "agent_states", {}).get(agent_name) if workflow_state else None
+        if snapshot is None:
+            return
+        metadata = getattr(snapshot, "metadata", {}) or {}
+        summary = getattr(snapshot, "summary", "") or ""
+        agent_root = self._artifact_root / str(workflow_id) / agent_name
+        agent_root.mkdir(parents=True, exist_ok=True)
+
+        prompt_messages = metadata.get("prompt_messages", [])
+        if isinstance(prompt_messages, list) and prompt_messages:
+            system_chunks = [str(item.get("content", "")) for item in prompt_messages if isinstance(item, dict) and str(item.get("role", "")).lower() == "system"]
+            user_chunks = [str(item.get("content", "")) for item in prompt_messages if isinstance(item, dict) and str(item.get("role", "")).lower() == "user"]
+            (agent_root / "prompt.md").write_text("\n\n".join(str(item.get("content", "")) for item in prompt_messages if isinstance(item, dict)), encoding="utf-8")
+            (agent_root / "system_prompt.md").write_text("\n\n".join(system_chunks), encoding="utf-8")
+            (agent_root / "user_prompt.md").write_text("\n\n".join(user_chunks), encoding="utf-8")
+            (agent_root / "context_used.md").write_text("\n\n".join(user_chunks)[:12000], encoding="utf-8")
+
+        raw_output = str(metadata.get("raw_output", "")).strip()
+        if raw_output:
+            (agent_root / "raw_output.md").write_text(raw_output, encoding="utf-8")
+        elif summary:
+            (agent_root / "raw_output.md").write_text(summary, encoding="utf-8")
+
+        structured = metadata.get("structured_output", {})
+        if isinstance(structured, dict) and structured:
+            (agent_root / "structured_output.json").write_text(json.dumps(structured, indent=2, ensure_ascii=False), encoding="utf-8")
+            handoff = str(metadata.get("handoff_summary") or structured.get("summary") or summary).strip()
+            if handoff:
+                (agent_root / "handoff.md").write_text(handoff, encoding="utf-8")
+        if event_name == "agent_failed":
+            errors = list(getattr(snapshot, "errors", tuple()) or [])
+            if errors:
+                (agent_root / "validation_error.txt").write_text("\n".join(str(item) for item in errors), encoding="utf-8")
+
+        validation = metadata.get("validation", {})
+        observability = metadata.get("observability", {})
+        token_report = {
+            "prompt_tokens": observability.get("prompt_token_estimate"),
+            "output_tokens": observability.get("output_token_estimate"),
+            "duration_seconds": observability.get("generation_duration_seconds"),
+            "validation": validation,
+        }
+        (agent_root / "token_report.json").write_text(json.dumps(token_report, indent=2, ensure_ascii=False), encoding="utf-8")
+        (agent_root / "execution_log.txt").write_text(
+            f"agent={agent_name}\nstatus={getattr(getattr(snapshot, 'status', None), 'value', None)}\nsummary={summary}\n",
+            encoding="utf-8",
+        )
+        if agent_name == "developer" and isinstance(structured, dict):
+            await self._persist_developer_files(agent_root, structured)
+        if agent_name == "docs":
+            markdown = ""
+            if isinstance(structured, dict):
+                markdown = str((structured.get("metadata", {}) or {}).get("documentation_markdown", "")).strip() if isinstance(structured.get("metadata", {}), dict) else ""
+            if not markdown:
+                markdown = raw_output or summary
+            if markdown:
+                (agent_root / "documentation.md").write_text(markdown, encoding="utf-8")
+            if "```mermaid" in markdown:
+                diagrams_dir = agent_root / "diagrams"
+                diagrams_dir.mkdir(parents=True, exist_ok=True)
+                blocks = markdown.split("```mermaid")
+                index = 0
+                for block in blocks[1:]:
+                    body = block.split("```", 1)[0].strip()
+                    if body:
+                        (diagrams_dir / f"diagram-{index}.mmd").write_text(body, encoding="utf-8")
+                        index += 1
+
+    async def _persist_developer_files(self, agent_root: Path, structured: dict[str, Any]) -> None:
+        code_dir = agent_root / "code"
+        test_dir = agent_root / "tests"
+        code_dir.mkdir(parents=True, exist_ok=True)
+        test_dir.mkdir(parents=True, exist_ok=True)
+        patch_lines: list[str] = []
+        for change in structured.get("code_changes", []) if isinstance(structured.get("code_changes", []), list) else []:
+            if not isinstance(change, dict):
+                continue
+            path = str(change.get("path", "")).strip() or "generated/unknown.tsx"
+            content = str(change.get("content", "") or "")
+            target = code_dir / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            patch_lines.append(f"--- /dev/null\n+++ b/{path}\n{content}\n")
+        for test in structured.get("tests", []) if isinstance(structured.get("tests", []), list) else []:
+            if not isinstance(test, dict):
+                continue
+            path = str(test.get("path", "")).strip() or "generated/unknown.test.tsx"
+            content = str(test.get("content", "") or "")
+            target = test_dir / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            patch_lines.append(f"--- /dev/null\n+++ b/{path}\n{content}\n")
+        if patch_lines:
+            (agent_root / "patch.diff").write_text("\n".join(patch_lines), encoding="utf-8")
 
     def _runtime_event_payload(self, state: dict[str, Any], agent_name: str) -> dict[str, Any]:
         metadata = {

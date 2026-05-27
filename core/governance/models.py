@@ -27,6 +27,15 @@ class RulePriority(StrEnum):
     LOW = "low"
 
 
+class GovernanceSeverity(StrEnum):
+    """Runtime enforcement severity for a governance rule."""
+
+    INFO = "info"
+    WARNING = "warning"
+    NEEDS_REVIEW = "needs_review"
+    BLOCKING = "blocking"
+
+
 class RuleCategory(StrEnum):
     """Governance categories enforced by the platform."""
 
@@ -59,6 +68,7 @@ class GovernanceRule(ContractBaseModel):
     priority: RulePriority = RulePriority.NORMAL
     source: RuleSource = RuleSource.GLOBAL_DEFAULT
     allow_local_override: bool = False
+    severity: GovernanceSeverity = GovernanceSeverity.BLOCKING
     source_path: Path | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -80,4 +90,16 @@ class GovernanceValidationResult(ContractBaseModel):
     errors: tuple[str, ...] = Field(default_factory=tuple)
     warnings: tuple[str, ...] = Field(default_factory=tuple)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GovernanceViolation(ContractBaseModel):
+    """Evidence-based governance finding emitted during runtime checks."""
+
+    rule_id: str = Field(min_length=1)
+    severity: GovernanceSeverity
+    evidence: str = ""
+    matched_text: str = ""
+    reason: str = Field(min_length=1)
+    suggested_fix: str = ""
+    blocking: bool = False
 

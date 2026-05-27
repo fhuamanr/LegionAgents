@@ -1,6 +1,7 @@
 """Default global governance policies."""
 
 from core.governance.models import (
+    GovernanceSeverity,
     GovernancePolicy,
     GovernanceRule,
     RuleCategory,
@@ -39,6 +40,7 @@ def build_default_global_policy() -> GovernancePolicy:
                 effect=RuleEffect.REQUIRE,
                 category=RuleCategory.ARCHITECTURE,
                 priority=RulePriority.CRITICAL,
+                severity=GovernanceSeverity.NEEDS_REVIEW,
                 source=RuleSource.GLOBAL_DEFAULT,
             ),
             GovernanceRule(

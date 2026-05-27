@@ -4,6 +4,7 @@ x-backend-env: &backend-env
   APP_ENV: ${APP_ENV:-local}
   LOG_LEVEL: ${LOG_LEVEL:-debug}
   STORAGE_ROOT: /app/outputs
+  ARTIFACT_ROOT: /app/data/artifacts
   QA_SANDBOX_ARTIFACT_ROOT: /app/outputs/qa_sandbox
   REDIS_URL: redis://redis:6379/0
   POSTGRES_DSN: postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}
@@ -85,6 +86,7 @@ services:
       - ./repository:/app/repository:ro
       - ./workflows:/app/workflows
       - ./outputs:/app/outputs
+      - ./data/artifacts:/app/data/artifacts
       - backend-logs:/app/logs
     expose:
       - "8000"
@@ -125,6 +127,7 @@ services:
       - ./agents:/app/agents:ro
       - ./repository:/app/repository:ro
       - ./outputs:/app/outputs
+      - ./data/artifacts:/app/data/artifacts
     networks:
       - app
       - data

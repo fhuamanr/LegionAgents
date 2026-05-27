@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from core.contracts.agents import AgentStatus
 from core.contracts.artifacts import Artifact, ArtifactKind
 from core.contracts.execution import AgentExecutionRequest, AgentExecutionResult
-from core.governance import GovernancePolicy, GovernanceRule, PolicyValidator
+from core.governance import GovernancePolicy, GovernanceRule, GovernanceValidationResult, PolicyValidator
 from core.runtime.context import ContextAssembler, MarkdownRuleContextAssembler
 from core.runtime.models import RuntimeAgentConfig, RuntimeExecutionContext
 from core.runtime.prompts import PromptBuilder, RuntimePromptBuilder
@@ -97,17 +97,81 @@ class BaseAgent(ABC, Generic[TOutput]):
         started = time.perf_counter()
         raw_output = await self.invoke(runtime_context)
         duration_seconds = max(0.0, time.perf_counter() - started)
-        await self._enforce_governance_output(runtime_context, raw_output)
+        governance_runtime_result = await self._enforce_governance_output(runtime_context, raw_output)
         requested_parser = str(request.metadata.get("parser_strategy", "")).strip().lower()
         parse_strategy = None
         if requested_parser == "markdown_sections":
             parse_strategy = "ba_sections"
         elif self.config.name == "ba" and bool(request.metadata.get("local_lm_studio_safe_mode", False)):
             parse_strategy = "ba_sections"
-        structured_output = await self._output_validator.validate(raw_output, strategy=parse_strategy)
+        elif self.config.name == "developer":
+            parse_strategy = "developer_sections"
+        elif self.config.name == "qa":
+            parse_strategy = "qa_sections"
+        elif self.config.name == "docs":
+            parse_strategy = "docs_sections"
+        elif self.config.name == "pr":
+            parse_strategy = "pr_sections"
+        try:
+            structured_output = await self._output_validator.validate(raw_output, strategy=parse_strategy)
+        except ValueError as exc:
+            if self.config.name in {"developer", "qa", "docs", "pr"} and raw_output.strip():
+                raw_artifact = Artifact(
+                    id=f"{self.config.name}-raw-{request.execution_id}",
+                    kind=ArtifactKind.GENERIC,
+                    name="raw_output.md",
+                    producer_agent=self.config.name,
+                    content=raw_output,
+                )
+                validation_artifact = Artifact(
+                    id=f"{self.config.name}-validation-{request.execution_id}",
+                    kind=ArtifactKind.GENERIC,
+                    name="validation_error.txt",
+                    producer_agent=self.config.name,
+                    content=str(exc),
+                )
+                return AgentExecutionResult(
+                    execution_id=request.execution_id,
+                    agent_name=self.config.name,
+                    status=AgentStatus.COMPLETED,
+                    summary=f"{self.config.name.capitalize()} generated useful output but schema normalization needs review.",
+                    artifacts=(raw_artifact, validation_artifact),
+                    metadata={
+                        "error_type": "schema_contract_error",
+                        "review_status": "needs_review",
+                        "raw_output_preview": raw_output[:1200],
+                        "validation_error": str(exc),
+                        "retry_allowed": False,
+                        "route_signal": "continue",
+                    },
+                )
+            raise
         validation_metadata = dict(getattr(self._output_validator, "last_validation_metadata", {}))
-        await self._enforce_governance_output(runtime_context, raw_output, structured_output)
+        governance_output_result = await self._enforce_governance_output(runtime_context, raw_output, structured_output)
         artifacts = await self.build_artifacts(request, structured_output)
+        governance_result = governance_output_result or governance_runtime_result
+        governance_warnings = tuple(governance_result.warnings) if governance_result else tuple()
+        governance_report = governance_result.metadata if governance_result else {}
+        if governance_result is not None:
+            artifacts = artifacts + (
+                Artifact(
+                    id=f"{self.config.name}-governance-{request.execution_id}",
+                    kind=ArtifactKind.GENERIC,
+                    name="governance_report.json",
+                    producer_agent=self.config.name,
+                    content=governance_result.model_dump_json(indent=2),
+                ),
+            )
+        if self.config.name == "developer":
+            artifacts = artifacts + (
+                Artifact(
+                    id=f"{self.config.name}-raw-{request.execution_id}",
+                    kind=ArtifactKind.GENERIC,
+                    name="raw_output.md",
+                    producer_agent=self.config.name,
+                    content=raw_output,
+                ),
+            )
         return AgentExecutionResult(
             execution_id=request.execution_id,
             agent_name=self.config.name,
@@ -119,6 +183,11 @@ class BaseAgent(ABC, Generic[TOutput]):
                 "context_document_count": agent_context.metadata.get("document_count", 0),
                 "context_engineering": agent_context.metadata.get("context_engineering", {}),
                 "structured_output": structured_output.model_dump(mode="json"),
+                "raw_output": raw_output,
+                "prompt_messages": [
+                    {"role": message.role.value if hasattr(message.role, "value") else str(message.role), "content": message.content}
+                    for message in prompt_messages
+                ],
                 "prompt_budget": prompt_budget_observability,
                 "validation": validation_metadata,
                 "observability": {
@@ -132,6 +201,13 @@ class BaseAgent(ABC, Generic[TOutput]):
                     "fields_removed": validation_metadata.get("fields_removed", []),
                     "validation_result": validation_metadata.get("validation_result", "unknown"),
                     "parse_strategy": parse_strategy or "json",
+                    "developer_output_normalized": bool(validation_metadata.get("normalized_fields")) if self.config.name == "developer" else False,
+                    "developer_normalized_fields": validation_metadata.get("normalized_fields", []) if self.config.name == "developer" else [],
+                },
+                "governance_validation": {
+                    "status": "completed_with_warnings" if governance_warnings else "passed",
+                    "warnings": governance_warnings,
+                    "report": governance_report,
                 },
                 **self.result_metadata(structured_output),
             },
@@ -142,12 +218,13 @@ class BaseAgent(ABC, Generic[TOutput]):
         context: RuntimeExecutionContext,
         raw_output: str,
         structured_output: BaseModel | None = None,
-    ) -> None:
+    ) -> GovernanceValidationResult | None:
         policy = self._governance_policy_from_context(context)
         if policy is None:
-            return
+            return None
         validator = PolicyValidator()
         policy_result = validator.validate_policy(policy)
+        enforcement_mode = str(context.request.metadata.get("governance_enforcement_mode", "balanced")).strip().lower() or "balanced"
         output_result = (
             validator.validate_runtime_text(policy, raw_output)
             if structured_output is None
@@ -156,11 +233,16 @@ class BaseAgent(ABC, Generic[TOutput]):
                 agent_name=self.config.name,
                 raw_output=raw_output,
                 structured_output=structured_output,
+                enforcement_mode=enforcement_mode,
             )
         )
         errors = policy_result.errors + output_result.errors
         if errors:
-            raise ValueError("Governance runtime rejection: " + "; ".join(errors))
+            raise ValueError(
+                "governance_validation_error: Governance runtime rejection: "
+                + "; ".join(errors)
+            )
+        return output_result
 
     def _governance_policy_from_context(self, context: RuntimeExecutionContext) -> GovernancePolicy | None:
         rules = context.agent_context.metadata.get("governance_rules")

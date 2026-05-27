@@ -6,8 +6,10 @@ from core.governance.inheritance import PolicyInheritanceEngine
 from core.governance.loader import MarkdownPolicyLoader, PolicyLoader
 from core.governance.merger import AgentPolicyMerger
 from core.governance.models import (
+    GovernanceSeverity,
     GovernancePolicy,
     GovernanceRule,
+    GovernanceViolation,
     GovernanceValidationResult,
     RuleCategory,
     RuleEffect,
@@ -23,6 +25,8 @@ __all__ = [
     "EnterpriseStandardsRegistry",
     "GovernancePolicy",
     "GovernanceRule",
+    "GovernanceSeverity",
+    "GovernanceViolation",
     "GovernanceValidationResult",
     "MarkdownPolicyLoader",
     "PolicyInheritanceEngine",

@@ -1,0 +1,19 @@
+{
+  "id": "7f01390a-7423-4cad-af95-adf07677a7ed",
+  "contract_kind": "documentation_package",
+  "agent_name": "docs",
+  "summary": "Docs output",
+  "trace": {
+    "correlation_id": "b92ac6f5-652a-4df7-ac03-db82af6dfa35",
+    "causation_id": null,
+    "tenant_id": null,
+    "user_id": null,
+    "tags": [],
+    "attributes": {}
+  },
+  "artifacts": [],
+  "risks": [],
+  "dependencies": [],
+  "metadata": {},
+  "documents": []
+}

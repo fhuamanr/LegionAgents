@@ -1,0 +1,1 @@
+{"agent_name":"architect","summary":"Architecture output"}

@@ -84,6 +84,7 @@ class ProviderErrorClassifier:
     )
     _transient_patterns = ("timeout", "timed out", "connection reset", "temporary", "overloaded", "temporarily unavailable")
     _output_validation_patterns = ("schema_contract_error", "json_parse_error", "output validation failed")
+    _governance_patterns = ("governance_validation_error", "governance runtime rejection")
 
     def classify(self, exc: Exception) -> ProviderErrorDecision:
         text = str(exc)
@@ -110,6 +111,16 @@ class ProviderErrorClassifier:
                 technical_message=text,
                 suggested_action="Repair JSON/contract output locally or tighten output contract instructions.",
                 error_type=error_type,
+            )
+        if any(pattern in lowered for pattern in self._governance_patterns):
+            return ProviderErrorDecision(
+                classification="non_retryable",
+                retry_allowed=False,
+                compression_allowed=False,
+                user_message="Governance validation failed.",
+                technical_message=text,
+                suggested_action="Review governance report and adjust output or enforcement mode.",
+                error_type="governance_validation_error",
             )
         if any(pattern in lowered for pattern in self._auth_patterns) or status_code in {401, 403}:
             return ProviderErrorDecision(
