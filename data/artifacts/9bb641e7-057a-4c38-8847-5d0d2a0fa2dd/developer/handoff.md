@@ -1,0 +1,1 @@
+Created MVP for e-commerce platform with product list, user management, and shopping cart.

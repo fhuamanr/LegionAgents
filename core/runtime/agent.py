@@ -106,6 +106,8 @@ class BaseAgent(ABC, Generic[TOutput]):
             parse_strategy = "ba_sections"
         elif self.config.name == "developer":
             parse_strategy = "developer_sections"
+        elif self.config.name == "architect":
+            parse_strategy = "architect_sections"
         elif self.config.name == "qa":
             parse_strategy = "qa_sections"
         elif self.config.name == "docs":

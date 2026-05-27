@@ -30,8 +30,13 @@ class PydanticOutputValidator(OutputValidator[TOutput]):
         payload, normalized_fields = _normalize_payload_for_model(self._output_model, payload, raw_output=raw_output)
         normalized_payload, pre_removed = _sanitize_for_model(self._output_model, payload)
         self.last_validation_metadata = {
-            "json_extracted": parse_meta["json_extracted"],
-            "json_repaired": parse_meta["json_repaired"],
+            "json_extracted": bool(parse_meta.get("json_extracted", False)),
+            "json_repaired": bool(parse_meta.get("json_repaired", False)),
+            "repair_strategy": parse_meta.get("repair_strategy"),
+            "repair_actions": parse_meta.get("repair_actions", []),
+            "repair_candidates": parse_meta.get("repair_candidates", 0),
+            "artifact_fallback_used": bool(parse_meta.get("artifact_fallback_used", False)),
+            "extraction_strategy": parse_meta.get("extraction_strategy"),
             "fields_removed": pre_removed,
             "normalized_fields": normalized_fields,
             "normalization_applied": bool(normalized_fields),
@@ -39,6 +44,15 @@ class PydanticOutputValidator(OutputValidator[TOutput]):
             "validation_result": "started",
             "raw_output_size": len(raw_output),
             "schema_name": self._output_model.__name__,
+            "repaired_output": parse_meta.get("repaired_output"),
+            "normalized_output": normalized_payload,
+            "repair_report": {
+                "actions_applied": parse_meta.get("repair_actions", []),
+                "fields_inferred": normalized_fields,
+                "parse_warnings": parse_meta.get("parse_warnings", []),
+                "normalization_actions": normalized_fields,
+                "validation_warnings": [],
+            },
         }
         try:
             validated = self._output_model.model_validate(normalized_payload)
@@ -55,81 +69,180 @@ class PydanticOutputValidator(OutputValidator[TOutput]):
             self.last_validation_metadata["validation_result"] = "schema_contract_error"
             raise ValueError(f"schema_contract_error: {self._format_validation_error(exc)}") from exc
 
-    def _parse_payload(self, raw_output: str, *, strategy: str | None = None) -> tuple[dict[str, Any], dict[str, bool]]:
+    def _parse_payload(self, raw_output: str, *, strategy: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
         if strategy == "ba_sections":
             payload = self._parse_ba_sections(raw_output)
-            return payload, {"json_extracted": False, "json_repaired": False}
+            return payload, self._fallback_meta("ba_sections")
         if strategy == "developer_sections":
             try:
                 payload, meta = self._parse_json(raw_output)
                 return payload, meta
             except ValueError:
                 payload = self._parse_developer_sections(raw_output)
-                return payload, {"json_extracted": False, "json_repaired": False}
+                return payload, self._fallback_meta("developer_sections")
         if strategy == "qa_sections":
             try:
                 payload, meta = self._parse_json(raw_output)
                 return payload, meta
             except ValueError:
                 payload = self._parse_qa_sections(raw_output)
-                return payload, {"json_extracted": False, "json_repaired": False}
+                return payload, self._fallback_meta("qa_sections")
         if strategy == "docs_sections":
             try:
                 payload, meta = self._parse_json(raw_output)
                 return payload, meta
             except ValueError:
                 payload = self._parse_docs_sections(raw_output)
-                return payload, {"json_extracted": False, "json_repaired": False}
+                return payload, self._fallback_meta("docs_sections")
+        if strategy == "architect_sections":
+            try:
+                payload, meta = self._parse_json(raw_output)
+                return payload, meta
+            except ValueError:
+                payload = self._parse_architect_sections(raw_output)
+                return payload, self._fallback_meta("architect_sections")
         if strategy == "pr_sections":
             try:
                 payload, meta = self._parse_json(raw_output)
                 return payload, meta
             except ValueError:
                 payload = self._parse_pr_sections(raw_output)
-                return payload, {"json_extracted": False, "json_repaired": False}
-        return self._parse_json(raw_output)
-
-    def _parse_json(self, raw_output: str) -> tuple[dict[str, Any], dict[str, bool]]:
-        extracted = self._extract_json_block(raw_output)
-        repaired = False
+                return payload, self._fallback_meta("pr_sections")
         try:
-            payload = json.loads(extracted)
-        except json.JSONDecodeError as exc:
-            repaired_text = self._attempt_json_repair(extracted)
-            if repaired_text is None:
-                raise ValueError(f"json_parse_error: Output is not valid JSON: {exc}") from exc
-            repaired = True
-            payload = json.loads(repaired_text)
-        if not isinstance(payload, dict):
-            raise ValueError("json_parse_error: Output must be a JSON object.")
-        return payload, {"json_extracted": extracted.strip() != raw_output.strip(), "json_repaired": repaired}
+            return self._parse_json(raw_output)
+        except ValueError:
+            payload = self._parse_model_markdown_fallback(raw_output)
+            if payload:
+                return payload, self._fallback_meta("markdown_fallback")
+            raise
 
-    def _extract_json_block(self, raw_output: str) -> str:
-        text = raw_output.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if len(lines) >= 3 and lines[0].strip().startswith("```") and lines[-1].strip() == "```":
-                return "\n".join(lines[1:-1]).strip()
+    def _fallback_meta(self, strategy: str) -> dict[str, Any]:
+        return {
+            "json_extracted": False,
+            "json_repaired": False,
+            "repair_strategy": strategy,
+            "repair_actions": [],
+            "repair_candidates": 0,
+            "artifact_fallback_used": True,
+            "extraction_strategy": strategy,
+            "parse_warnings": [],
+            "repaired_output": None,
+        }
+
+    def _parse_json(self, raw_output: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        candidates = self._extract_json_candidates(raw_output)
+        parse_errors: list[str] = []
+        for extracted in candidates:
+            repaired = False
+            repaired_text: str | None = None
+            actions: list[str] = []
+            try:
+                payload = json.loads(extracted)
+            except json.JSONDecodeError as exc:
+                repaired_text, actions = self._attempt_json_repair(extracted)
+                if repaired_text is None:
+                    parse_errors.append(str(exc))
+                    continue
+                try:
+                    payload = json.loads(repaired_text)
+                    repaired = True
+                except json.JSONDecodeError as repaired_exc:
+                    parse_errors.append(str(repaired_exc))
+                    continue
+            if not isinstance(payload, dict):
+                continue
+            return payload, {
+                "json_extracted": extracted.strip() != raw_output.strip(),
+                "json_repaired": repaired,
+                "repair_strategy": "json_repair" if repaired else "json_direct",
+                "repair_actions": actions,
+                "repair_candidates": len(candidates),
+                "artifact_fallback_used": False,
+                "extraction_strategy": "candidate_scan",
+                "parse_warnings": tuple(parse_errors[:3]),
+                "repaired_output": repaired_text,
+            }
+        details = parse_errors[0] if parse_errors else "no recoverable JSON object found"
+        raise ValueError(f"json_parse_error: Output is not valid JSON: {details}")
+
+    def _extract_json_candidates(self, raw_output: str) -> list[str]:
+        text = (raw_output or "").strip()
+        if not text:
+            return []
+        candidates: list[str] = []
+        fence_pattern = re.compile(r"```(?:json|javascript|js)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+        candidates.extend(match.group(1).strip() for match in fence_pattern.finditer(text) if match.group(1).strip())
         start = text.find("{")
         end = text.rfind("}")
         if start >= 0 and end > start:
-            return text[start : end + 1]
-        return text
+            candidates.append(text[start : end + 1].strip())
+        stack = 0
+        obj_start = -1
+        for index, char in enumerate(text):
+            if char == "{":
+                if stack == 0:
+                    obj_start = index
+                stack += 1
+            elif char == "}":
+                if stack > 0:
+                    stack -= 1
+                    if stack == 0 and obj_start >= 0:
+                        candidates.append(text[obj_start : index + 1].strip())
+                        obj_start = -1
+        if start >= 0 and stack > 0:
+            candidates.append(text[start:].strip())
+        candidates.append(text)
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for candidate in sorted(candidates, key=len, reverse=True):
+            normalized = candidate.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(normalized)
+        return deduped
 
-    def _attempt_json_repair(self, text: str) -> str | None:
+    def _attempt_json_repair(self, text: str) -> tuple[str | None, list[str]]:
         candidate = text.strip()
-        candidate = candidate.replace("```json", "").replace("```", "").strip()
+        actions: list[str] = []
+        if "```" in candidate:
+            candidate = candidate.replace("```json", "").replace("```", "").strip()
+            actions.append("strip_markdown_fences")
+        patched = re.sub(r"/\*.*?\*/", "", candidate, flags=re.DOTALL)
+        patched = re.sub(r"(^|\s)//.*?$", " ", patched, flags=re.MULTILINE)
+        if patched != candidate:
+            candidate = patched
+            actions.append("remove_json_comments")
         start = candidate.find("{")
         end = candidate.rfind("}")
         if start >= 0 and end > start:
             candidate = candidate[start : end + 1]
+            actions.append("trim_to_object_bounds")
+        patched = re.sub(r"(?<!\\)'([A-Za-z0-9_\- ]+?)'\s*:", r'"\1":', candidate)
+        patched = re.sub(r":\s*'([^'\n\r]*)'", lambda m: ': "' + m.group(1).replace('"', '\\"') + '"', patched)
+        if patched != candidate:
+            candidate = patched
+            actions.append("single_to_double_quotes")
+        patched = re.sub(r",\s*([}\]])", r"\1", candidate)
+        if patched != candidate:
+            candidate = patched
+            actions.append("remove_trailing_commas")
+        patched = re.sub(r'([}\]"0-9])\s*(")', r"\1,\2", candidate)
+        patched = re.sub(r'(")\s*({)', r"\1,\2", patched)
+        if patched != candidate:
+            candidate = patched
+            actions.append("insert_missing_commas")
         if candidate.count("{") > candidate.count("}"):
             candidate = candidate + ("}" * (candidate.count("{") - candidate.count("}")))
+            actions.append("close_missing_braces")
+        if candidate.count("[") > candidate.count("]"):
+            candidate = candidate + ("]" * (candidate.count("[") - candidate.count("]")))
+            actions.append("close_missing_brackets")
         try:
             json.loads(candidate)
-            return candidate
+            return candidate, actions
         except json.JSONDecodeError:
-            return None
+            return None, actions
 
     def _parse_ba_sections(self, raw_output: str) -> dict[str, Any]:
         text = raw_output.strip()
@@ -280,6 +393,45 @@ class PydanticOutputValidator(OutputValidator[TOutput]):
             "source_branch": "codex/draft",
         }
 
+    def _parse_architect_sections(self, raw_output: str) -> dict[str, Any]:
+        text = raw_output.strip()
+        if not text:
+            return {}
+        bullets = [line.lstrip("- ").strip() for line in text.splitlines() if line.strip().startswith("-")]
+        decisions: list[dict[str, Any]] = []
+        for index, bullet in enumerate(bullets[:5], start=1):
+            decisions.append(
+                {
+                    "id": f"AD-{index}",
+                    "title": bullet[:90] or f"Decision {index}",
+                    "context": "Derived from architect markdown output.",
+                    "decision": bullet[:240] or "Architecture decision captured from markdown output.",
+                    "consequences": [],
+                    "constraints": [],
+                }
+            )
+        return {
+            "agent_name": "architect",
+            "summary": text.splitlines()[0][:180] if text else "Architect output parsed from markdown sections.",
+            "decisions": decisions,
+        }
+
+    def _parse_model_markdown_fallback(self, raw_output: str) -> dict[str, Any]:
+        model_name = self._output_model.__name__
+        if model_name == "DeveloperOutput":
+            return self._parse_developer_sections(raw_output)
+        if model_name == "QAOutput":
+            return self._parse_qa_sections(raw_output)
+        if model_name == "DocsOutput":
+            return self._parse_docs_sections(raw_output)
+        if model_name == "ArchitectOutput":
+            return self._parse_architect_sections(raw_output)
+        if model_name == "BARequirementsOutput":
+            return self._parse_ba_sections(raw_output)
+        if model_name == "PullRequestOutput":
+            return self._parse_pr_sections(raw_output)
+        return {}
+
     def _format_validation_error(self, exc: ValidationError) -> str:
         return "; ".join(
             f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
@@ -338,6 +490,8 @@ def _normalize_payload_for_model(
     *,
     raw_output: str,
 ) -> tuple[dict[str, Any], list[str]]:
+    if model.__name__ == "ArchitectOutput":
+        return _normalize_architect_payload(payload, raw_output=raw_output)
     if model.__name__ == "QAOutput":
         return _normalize_qa_payload(payload, raw_output=raw_output)
     if model.__name__ == "DocsOutput":
@@ -497,6 +651,34 @@ def _normalize_qa_payload(payload: dict[str, Any], *, raw_output: str) -> tuple[
     if not isinstance(normalized.get("metadata"), dict):
         normalized["metadata"] = {}
     normalized["metadata"].setdefault("raw_output_size", len(raw_output))
+    return normalized, added
+
+
+def _normalize_architect_payload(payload: dict[str, Any], *, raw_output: str) -> tuple[dict[str, Any], list[str]]:
+    normalized = dict(payload or {})
+    added: list[str] = []
+    if not normalized.get("agent_name"):
+        normalized["agent_name"] = "architect"
+        added.append("agent_name")
+    if not str(normalized.get("summary", "")).strip():
+        seed = raw_output.strip().splitlines()[0][:180] if raw_output.strip() else ""
+        normalized["summary"] = seed or "Architect output generated with limited structured output."
+        added.append("summary")
+    if not isinstance(normalized.get("decisions"), list):
+        normalized["decisions"] = []
+        added.append("decisions")
+    if not normalized["decisions"] and raw_output.strip():
+        normalized["decisions"] = [
+            {
+                "id": "AD-1",
+                "title": "Architecture outline",
+                "context": "Recovered from unstructured architect output.",
+                "decision": raw_output.strip()[:400],
+                "consequences": [],
+                "constraints": [],
+            }
+        ]
+        added.append("decisions.0")
     return normalized, added
 
 

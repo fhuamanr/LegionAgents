@@ -800,6 +800,35 @@ class ExecutionService:
                     "fields_removed": validation_meta.get("fields_removed", []),
                 },
             )
+        if validation_meta.get("json_repaired"):
+            await self.emitter.emit(
+                ExecutionEventType.TELEMETRY_RECORDED,
+                workflow_id=workflow_id,
+                execution_id=state.get("execution_id"),
+                thread_id=thread_id,
+                agent_name=agent_name,
+                message="output_repaired",
+                payload={
+                    "event": "output_repaired",
+                    "agent_name": agent_name,
+                    "repair_strategy": validation_meta.get("repair_strategy"),
+                    "repair_actions": validation_meta.get("repair_actions", []),
+                },
+            )
+        if validation_meta.get("artifact_fallback_used"):
+            await self.emitter.emit(
+                ExecutionEventType.TELEMETRY_RECORDED,
+                workflow_id=workflow_id,
+                execution_id=state.get("execution_id"),
+                thread_id=thread_id,
+                agent_name=agent_name,
+                message="artifact_fallback_used",
+                payload={
+                    "event": "artifact_fallback_used",
+                    "agent_name": agent_name,
+                    "extraction_strategy": validation_meta.get("extraction_strategy"),
+                },
+            )
 
     async def _persist_agent_artifact_bundle(
         self,
@@ -845,6 +874,22 @@ class ExecutionService:
 
         validation = metadata.get("validation", {})
         observability = metadata.get("observability", {})
+        if isinstance(validation, dict):
+            repaired_output = validation.get("repaired_output")
+            normalized_output = validation.get("normalized_output")
+            repair_report = validation.get("repair_report")
+            if isinstance(repaired_output, str) and repaired_output.strip():
+                (agent_root / "repaired_output.json").write_text(repaired_output, encoding="utf-8")
+            if isinstance(normalized_output, dict) and normalized_output:
+                (agent_root / "normalized_output.json").write_text(
+                    json.dumps(normalized_output, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            if isinstance(repair_report, dict) and repair_report:
+                (agent_root / "repair_report.json").write_text(
+                    json.dumps(repair_report, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
         token_report = {
             "prompt_tokens": observability.get("prompt_token_estimate"),
             "output_tokens": observability.get("output_token_estimate"),

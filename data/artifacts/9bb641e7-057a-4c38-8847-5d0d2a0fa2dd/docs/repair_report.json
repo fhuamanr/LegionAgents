@@ -1,0 +1,19 @@
+{
+  "actions_applied": [
+    "strip_markdown_fences",
+    "trim_to_object_bounds",
+    "insert_missing_commas"
+  ],
+  "fields_inferred": [
+    "agent_name",
+    "summary",
+    "documents"
+  ],
+  "parse_warnings": [],
+  "normalization_actions": [
+    "agent_name",
+    "summary",
+    "documents"
+  ],
+  "validation_warnings": []
+}

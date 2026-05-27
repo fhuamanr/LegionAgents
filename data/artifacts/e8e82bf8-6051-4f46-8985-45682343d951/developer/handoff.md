@@ -1,1 +1,0 @@
-Developed a basic e-commerce MVP with product listing, user management, and shopping cart functionality.

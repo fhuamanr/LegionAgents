@@ -1,0 +1,19 @@
+{
+  "actions_applied": [],
+  "fields_inferred": [
+    "findings",
+    "test_reports",
+    "execution_logs",
+    "bug_summaries",
+    "passed"
+  ],
+  "parse_warnings": [],
+  "normalization_actions": [
+    "findings",
+    "test_reports",
+    "execution_logs",
+    "bug_summaries",
+    "passed"
+  ],
+  "validation_warnings": []
+}

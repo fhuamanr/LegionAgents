@@ -88,6 +88,21 @@ class InvalidBASectionModelClient(WorkflowModelClient):
         return await super().complete(messages)
 
 
+class MalformedDeveloperJsonModelClient(WorkflowModelClient):
+    async def complete(self, messages: tuple[PromptMessage, ...]) -> str:
+        prompt = "\n\n".join(message.content for message in messages)
+        if "Agent name: developer." in prompt:
+            return (
+                '{'
+                '"agent_name":"developer"'
+                '"summary":"Developer output",'
+                '"code_changes":[{"content":"def hello() -> str:\\n    return \\"hello\\"\\n"}],'
+                '"tests":[{"content":"def test_hello():\\n    assert True\\n"}]'
+                "}"
+            )
+        return await super().complete(messages)
+
+
 @pytest.mark.asyncio
 async def test_real_workflow_runtime_executes_full_delivery_sequence() -> None:
     repository = InMemoryWorkflowExecutionRepository()
@@ -256,3 +271,14 @@ async def test_local_safe_mode_emits_compaction_and_handoff_events() -> None:
     assert "compact_mode_enabled" in events
     assert "context_budget_estimated" in events
     assert "handoff_generated" in events
+
+
+@pytest.mark.asyncio
+async def test_workflow_survives_developer_malformed_json_with_repair() -> None:
+    runtime = LangGraphExecutionRuntime(model_client=MalformedDeveloperJsonModelClient())
+    result = await runtime.start("Deliver workflow with malformed developer JSON")
+    latest = await runtime.repository.latest_checkpoint(result.execution_id)
+    assert result.status == WorkflowRunStatus.COMPLETED
+    assert latest is not None
+    developer = latest.state.agent_states["developer"]
+    assert developer.status == AgentStatus.COMPLETED

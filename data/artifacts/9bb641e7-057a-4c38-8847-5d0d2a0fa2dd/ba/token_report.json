@@ -1,0 +1,38 @@
+{
+  "prompt_tokens": 221,
+  "output_tokens": 865,
+  "duration_seconds": 119.977,
+  "validation": {
+    "json_extracted": false,
+    "json_repaired": false,
+    "repair_strategy": "ba_sections",
+    "repair_actions": [],
+    "repair_candidates": 0,
+    "artifact_fallback_used": true,
+    "extraction_strategy": "ba_sections",
+    "fields_removed": [],
+    "normalized_fields": [],
+    "normalization_applied": false,
+    "sanitization_applied": false,
+    "validation_result": "ok",
+    "raw_output_size": 3461,
+    "schema_name": "BARequirementsOutput",
+    "repaired_output": null,
+    "normalized_output": {
+      "agent_name": "ba",
+      "summary": "BA requirements extracted.",
+      "normalized_requirement": "",
+      "user_stories": [],
+      "assumptions": [],
+      "risks": [],
+      "dependencies": []
+    },
+    "repair_report": {
+      "actions_applied": [],
+      "fields_inferred": [],
+      "parse_warnings": [],
+      "normalization_actions": [],
+      "validation_warnings": []
+    }
+  }
+}

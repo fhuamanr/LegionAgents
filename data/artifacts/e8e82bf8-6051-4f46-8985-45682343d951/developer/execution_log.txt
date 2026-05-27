@@ -1,3 +1,0 @@
-agent=developer
-status=completed
-summary=

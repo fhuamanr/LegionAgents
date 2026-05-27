@@ -1,3 +1,0 @@
-agent=pr
-status=completed
-summary=

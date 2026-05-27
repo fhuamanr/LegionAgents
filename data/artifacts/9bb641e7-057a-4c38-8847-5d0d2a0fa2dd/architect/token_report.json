@@ -1,0 +1,58 @@
+{
+  "prompt_tokens": 197,
+  "output_tokens": 408,
+  "duration_seconds": 62.106,
+  "validation": {
+    "json_extracted": false,
+    "json_repaired": false,
+    "repair_strategy": "ba_sections",
+    "repair_actions": [],
+    "repair_candidates": 0,
+    "artifact_fallback_used": true,
+    "extraction_strategy": "ba_sections",
+    "fields_removed": [
+      "normalized_requirement",
+      "user_stories",
+      "assumptions"
+    ],
+    "normalized_fields": [
+      "decisions",
+      "decisions.0"
+    ],
+    "normalization_applied": true,
+    "sanitization_applied": true,
+    "validation_result": "ok",
+    "raw_output_size": 1635,
+    "schema_name": "ArchitectOutput",
+    "repaired_output": null,
+    "normalized_output": {
+      "agent_name": "ba",
+      "summary": "BA requirements extracted.",
+      "risks": [],
+      "dependencies": [],
+      "decisions": [
+        {
+          "id": "AD-1",
+          "title": "Architecture outline",
+          "context": "Recovered from unstructured architect output.",
+          "decision": "# Architecture Decisions and Constraints\n\n## 1. Technology Stack\n- **Frontend:** React.js for a dynamic and responsive user interface.\n- **Backend:** Node.js with Express.js for handling API requests and business logic.\n- **Database:** MongoDB for storing product, user, and cart data due to its flexibility and scalability.\n\n## 2. Microservices Architecture\n- The application will be divided into mi",
+          "consequences": [],
+          "constraints": []
+        }
+      ]
+    },
+    "repair_report": {
+      "actions_applied": [],
+      "fields_inferred": [
+        "decisions",
+        "decisions.0"
+      ],
+      "parse_warnings": [],
+      "normalization_actions": [
+        "decisions",
+        "decisions.0"
+      ],
+      "validation_warnings": []
+    }
+  }
+}

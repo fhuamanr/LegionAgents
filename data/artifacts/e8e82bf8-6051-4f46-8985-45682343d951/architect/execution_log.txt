@@ -1,3 +1,0 @@
-agent=architect
-status=completed
-summary=

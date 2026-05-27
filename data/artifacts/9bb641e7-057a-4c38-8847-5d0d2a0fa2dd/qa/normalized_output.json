@@ -1,0 +1,12 @@
+{
+  "agent_name": "qa",
+  "summary": "QA completed without issues, MVP requirements met.",
+  "findings": [],
+  "test_reports": [],
+  "execution_logs": [],
+  "bug_summaries": [],
+  "passed": true,
+  "metadata": {
+    "raw_output_size": 741
+  }
+}

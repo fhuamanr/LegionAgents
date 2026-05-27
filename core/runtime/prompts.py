@@ -23,6 +23,7 @@ class RuntimePromptBuilder(PromptBuilder):
         config = context.agent_config
         metadata = request.metadata
         local_compact_mode = bool(metadata.get("local_lm_studio_safe_mode", False) or metadata.get("compact_mode_enabled", False))
+        compact_schema_mode = bool(metadata.get("compact_schema_mode", local_compact_mode))
         parser_strategy = str(metadata.get("parser_strategy", "")).strip().lower()
         require_json = parser_strategy not in {"markdown_sections"}
         enable_governance = bool(metadata.get("enable_governance_context", not local_compact_mode))
@@ -44,6 +45,8 @@ class RuntimePromptBuilder(PromptBuilder):
                     "The JSON object must satisfy the configured output schema.",
                 ]
             )
+            if compact_schema_mode:
+                system_sections.append("Use compact schema mode: keep fields minimal, avoid deep nesting, and keep arrays short.")
             if config.name == "developer":
                 system_sections.extend(
                     [

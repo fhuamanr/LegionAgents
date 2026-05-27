@@ -1,3 +1,0 @@
-agent=ba
-status=completed
-summary=

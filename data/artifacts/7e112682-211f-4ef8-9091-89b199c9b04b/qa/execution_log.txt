@@ -1,3 +1,0 @@
-agent=qa
-status=completed
-summary=
