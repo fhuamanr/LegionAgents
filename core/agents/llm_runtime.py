@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from core.agents.model_clients import OpenAIChatModelClient
+from core.agents.ba_intelligence import build_ba_intelligence_bundle
 from core.agents.runtime import AgentModelClient
 from core.contracts.agents import AgentStatus
 from core.contracts.artifacts import Artifact, ArtifactKind
@@ -117,6 +118,56 @@ class LLMStructuredAgentRuntime(BaseAgent[BaseModel]):
             metadata["route_signal"] = "continue" if output.passed else "reject"
             metadata["passed"] = output.passed
         return metadata
+
+
+class BusinessAnalystAgentRuntime(LLMStructuredAgentRuntime):
+    """BA runtime with advanced functional-analysis intelligence outputs."""
+
+    async def build_artifacts(
+        self,
+        request: AgentExecutionRequest,
+        output: BaseModel,
+    ) -> tuple[Artifact, ...]:
+        base = await super().build_artifacts(request, output)
+        if not isinstance(output, BARequirementsOutput):
+            return base
+        bundle = build_ba_intelligence_bundle(
+            task=request.task,
+            structured_output=output.model_dump(mode="json"),
+        )
+        artifacts: list[Artifact] = list(base)
+        for name, content in bundle["documents"].items():
+            artifacts.append(
+                Artifact(
+                    id=f"ba-doc-{request.execution_id}-{name}",
+                    kind=ArtifactKind.DOCUMENTATION,
+                    name=name,
+                    producer_agent=self.config.name,
+                    content=content,
+                )
+            )
+        for name, content in bundle["diagrams"].items():
+            artifacts.append(
+                Artifact(
+                    id=f"ba-diagram-{request.execution_id}-{name}",
+                    kind=ArtifactKind.DIAGRAM,
+                    name=name,
+                    producer_agent=self.config.name,
+                    content=content,
+                )
+            )
+        return tuple(artifacts)
+
+    def result_metadata(self, output: BaseModel) -> dict[str, object]:
+        base = super().result_metadata(output)
+        if not isinstance(output, BARequirementsOutput):
+            return base
+        bundle = build_ba_intelligence_bundle(
+            task=str(getattr(output, "summary", "")),
+            structured_output=output.model_dump(mode="json"),
+        )
+        base["ba_intelligence"] = bundle
+        return base
 
 
 class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
@@ -457,7 +508,7 @@ def build_llm_agent_runtimes(
     )
 
     runtimes: dict[str, LLMStructuredAgentRuntime] = {
-        name: LLMStructuredAgentRuntime(
+        name: (BusinessAnalystAgentRuntime if name == "ba" else LLMStructuredAgentRuntime)(
             config=RuntimeAgentConfig(
                 name=name,
                 role=role,

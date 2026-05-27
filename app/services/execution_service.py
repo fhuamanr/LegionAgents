@@ -1323,6 +1323,24 @@ class ExecutionService:
         )
         if agent_name == "developer" and isinstance(structured, dict):
             await self._persist_developer_files(agent_root, structured)
+        if agent_name == "ba":
+            intelligence = metadata.get("ba_intelligence", {}) if isinstance(metadata, dict) else {}
+            documents = intelligence.get("documents", {}) if isinstance(intelligence, dict) else {}
+            diagrams = intelligence.get("diagrams", {}) if isinstance(intelligence, dict) else {}
+            if isinstance(documents, dict):
+                for name, content in documents.items():
+                    if not isinstance(name, str):
+                        continue
+                    target = agent_root / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(str(content), encoding="utf-8")
+            if isinstance(diagrams, dict):
+                for name, content in diagrams.items():
+                    if not isinstance(name, str):
+                        continue
+                    target = agent_root / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(str(content), encoding="utf-8")
         if agent_name == "docs":
             markdown = ""
             if isinstance(structured, dict):

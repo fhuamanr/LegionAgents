@@ -23,6 +23,25 @@ export function WorkflowArtifactsPanel({ workflowId, artifacts }: Readonly<{ wor
     diagrams: artifacts.filter((item) => item.relativePath.includes("/diagrams/") || item.relativePath.endsWith(".mmd")),
   };
   const qualityReport = artifacts.find((item) => item.relativePath.endsWith("improvements/quality_report.md"));
+  const baFiles = artifacts.filter((item) => item.relativePath.startsWith("ba/"));
+  const requiredBaArtifacts = [
+    "ba/mvp_application_flow.md",
+    "ba/frontend_mvp_expectations.md",
+    "ba/domain_entities.md",
+    "ba/state_machines.md",
+    "ba/business_events.md",
+    "ba/functional_flows.md",
+    "ba/validation_rules.md",
+    "ba/permissions_matrix.md",
+    "ba/failure_flows.md",
+    "ba/ux_behavior_rules.md",
+    "ba/api_expectations.md",
+    "ba/ba_quality_report.md",
+  ];
+  const baCompleteness = Math.round(
+    (requiredBaArtifacts.filter((path) => artifacts.some((item) => item.relativePath === path)).length / requiredBaArtifacts.length) * 100,
+  );
+  const inferredMvp = artifacts.find((item) => item.relativePath === "ba/mvp_application_flow.md");
   return (
     <Card>
       <CardHeader>
@@ -37,6 +56,16 @@ export function WorkflowArtifactsPanel({ workflowId, artifacts }: Readonly<{ wor
           <div>Docs files: {byZone.docs.length}</div>
           <div>Diagrams: {byZone.diagrams.length}</div>
         </div>
+        <div className="grid gap-2 rounded border p-3 text-xs sm:grid-cols-2">
+          <div>BA completeness score: {Number.isFinite(baCompleteness) ? baCompleteness : 0}%</div>
+          <div>BA artifact count: {baFiles.length}</div>
+        </div>
+        {inferredMvp ? (
+          <details className="rounded border bg-muted/30 p-2">
+            <summary className="cursor-pointer text-xs font-semibold">Inferred MVP structure (BA)</summary>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs">{inferredMvp.preview}</pre>
+          </details>
+        ) : null}
         {qualityReport ? (
           <details className="rounded border bg-muted/30 p-2">
             <summary className="cursor-pointer text-xs font-semibold">Quality report available (improvements/quality_report.md)</summary>
