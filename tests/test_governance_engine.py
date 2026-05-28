@@ -349,3 +349,71 @@ async def test_hardcoded_secret_still_blocks_developer() -> None:
     )
     assert result.valid is False
     assert any("global.security.no-secret-exposure" in error for error in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_developer_safe_controller_guidance_does_not_fail() -> None:
+    engine = AgentGovernanceEngine(
+        agents_root=Path.cwd() / "agents",
+        standards_root=Path.cwd() / "repository" / "standards",
+    )
+    output = DeveloperOutput(
+        agent_name="developer",
+        summary="Architecture guidance text",
+        code_changes=(
+            CodeChangeProposal(
+                path="docs/implementation_summary.md",
+                change_type="create",
+                description="Guidance",
+                content="Controllers should not contain business logic and should delegate to use cases.",
+            ),
+        ),
+        tests=(
+            TestGenerationProposal(
+                path="tests/test_architecture.py",
+                test_type="unit",
+                description="doc coverage",
+                content="def test_docs(): assert True\n",
+            ),
+        ),
+    )
+    result = await engine.validate_generated_output(
+        agent_name="developer",
+        raw_output=output.model_dump_json(),
+        structured_output=output,
+    )
+    assert result.valid is True
+
+
+@pytest.mark.asyncio
+async def test_developer_controller_sql_code_can_trigger_blocking() -> None:
+    engine = AgentGovernanceEngine(
+        agents_root=Path.cwd() / "agents",
+        standards_root=Path.cwd() / "repository" / "standards",
+    )
+    output = DeveloperOutput(
+        agent_name="developer",
+        summary="Bad controller implementation",
+        code_changes=(
+            CodeChangeProposal(
+                path="backend/src/api/controllers/orders_controller.py",
+                change_type="update",
+                description="Inline SQL in controller",
+                content="def list_orders():\n    return db.execute('select * from orders')\n",
+            ),
+        ),
+        tests=(
+            TestGenerationProposal(
+                path="tests/test_orders.py",
+                test_type="unit",
+                description="orders",
+                content="def test_orders(): assert True\n",
+            ),
+        ),
+    )
+    result = await engine.validate_generated_output(
+        agent_name="developer",
+        raw_output=output.model_dump_json(),
+        structured_output=output,
+    )
+    assert result.valid is False

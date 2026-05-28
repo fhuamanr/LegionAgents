@@ -102,4 +102,7 @@ class GovernanceViolation(ContractBaseModel):
     reason: str = Field(min_length=1)
     suggested_fix: str = ""
     blocking: bool = False
+    artifact_path: str = ""
+    content_type: str = ""
+    safe_phrase_detected: bool = False
 

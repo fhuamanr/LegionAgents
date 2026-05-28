@@ -1786,8 +1786,8 @@ class ExecutionService:
         return "\n".join(lines) + "\n"
 
     async def _persist_developer_files(self, agent_root: Path, structured: dict[str, Any]) -> None:
-        code_dir = agent_root / "code"
-        test_dir = agent_root / "tests"
+        code_dir = agent_root / "generated_project"
+        test_dir = agent_root / "generated_project" / "tests"
         code_dir.mkdir(parents=True, exist_ok=True)
         test_dir.mkdir(parents=True, exist_ok=True)
         patch_lines: list[str] = []
@@ -1796,19 +1796,25 @@ class ExecutionService:
                 continue
             path = str(change.get("path", "")).strip() or "generated/unknown.tsx"
             content = str(change.get("content", "") or "")
-            target = code_dir / path
+            relative = path
+            if relative.startswith("generated_project/"):
+                relative = relative[len("generated_project/") :]
+            target = code_dir / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
-            patch_lines.append(f"--- /dev/null\n+++ b/{path}\n{content}\n")
+            patch_lines.append(f"--- /dev/null\n+++ b/generated_project/{relative}\n{content}\n")
         for test in structured.get("tests", []) if isinstance(structured.get("tests", []), list) else []:
             if not isinstance(test, dict):
                 continue
             path = str(test.get("path", "")).strip() or "generated/unknown.test.tsx"
             content = str(test.get("content", "") or "")
-            target = test_dir / path
+            relative = path
+            if relative.startswith("generated_project/"):
+                relative = relative[len("generated_project/") :]
+            target = agent_root / "generated_project" / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
-            patch_lines.append(f"--- /dev/null\n+++ b/{path}\n{content}\n")
+            patch_lines.append(f"--- /dev/null\n+++ b/generated_project/{relative}\n{content}\n")
         if patch_lines:
             (agent_root / "patch.diff").write_text("\n".join(patch_lines), encoding="utf-8")
 

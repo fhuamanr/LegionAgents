@@ -80,6 +80,13 @@ class PolicyValidator:
         mode = enforcement_mode.strip().lower() or "balanced"
         violations: list[GovernanceViolation] = []
         violations.extend(self._forbidden_violations(policy, output_text, mode))
+        violations = self._filter_false_positive_forbidden_violations(
+            violations=violations,
+            agent_name=agent_name,
+            output_text=output_text,
+            structured_output=structured_output,
+            enforcement_mode=mode,
+        )
         warnings: list[str] = []
         enforced_rules: list[str] = []
 
@@ -196,7 +203,14 @@ class PolicyValidator:
         if "shared-kernel" in text or "shared kernel" in text:
             patterns.append(r"shared[-_ ]kernel")
         if "lógica en controllers" in text or "logic in controllers" in text or "controllers" in text:
-            patterns.append(r"(controller|controllers).{0,160}(business|domain|repository|sql|use case|usecase)")
+            patterns.extend(
+                [
+                    r"(controller|controllers).{0,120}(select\s+\*|insert\s+into|update\s+\w+\s+set|delete\s+from)",
+                    r"(controller|controllers).{0,120}(import|from)\s+.*(repository|infra|infrastructure)",
+                    r"(controller|controllers).{0,120}(new\s+\w*repository|repository\s*\()",
+                    r"(controller|controllers).{0,120}(business logic|domain rule|domain service)",
+                ]
+            )
         return tuple(re.compile(pattern) for pattern in patterns)
 
     def _required_check(self, description: str) -> str | None:
@@ -356,6 +370,77 @@ class PolicyValidator:
             return True
         generic_markers = {"{}", "[]", "none", "n/a"}
         return evidence.lower() in generic_markers or matched.lower() in generic_markers
+
+    def _filter_false_positive_forbidden_violations(
+        self,
+        *,
+        violations: list[GovernanceViolation],
+        agent_name: str,
+        output_text: str,
+        structured_output: Any | None,
+        enforcement_mode: str,
+    ) -> list[GovernanceViolation]:
+        if agent_name != "developer":
+            return violations
+        filtered: list[GovernanceViolation] = []
+        safe_phrases = (
+            "should not",
+            "must not",
+            "avoid",
+            "delegate to",
+            "keep thin",
+            "do not access",
+            "no business logic",
+        )
+        controller_code = ""
+        if structured_output is not None:
+            for change in tuple(getattr(structured_output, "code_changes", tuple()) or tuple()):
+                path = str(getattr(change, "path", "")).lower()
+                content = str(getattr(change, "content", "") or "")
+                if "controller" in path or "controllers" in path:
+                    controller_code += "\n" + content
+        for violation in violations:
+            if "controller" not in violation.matched_text.lower():
+                filtered.append(violation)
+                continue
+            context = output_text.lower()
+            idx = context.find(violation.matched_text.lower())
+            snippet = context[max(0, idx - 80) : idx + len(violation.matched_text) + 120] if idx >= 0 else context[:260]
+            if any(phrase in snippet for phrase in safe_phrases):
+                continue
+            if controller_code.strip():
+                if violation.matched_text.lower() not in controller_code.lower():
+                    filtered.append(
+                        violation.model_copy(
+                            update={
+                                "blocking": False,
+                                "severity": GovernanceSeverity.WARNING,
+                                "reason": f"{violation.reason} (downgraded: matched in non-code context)",
+                                "content_type": "docs",
+                            }
+                        )
+                    )
+                    continue
+                filtered.append(
+                    violation.model_copy(
+                        update={
+                            "content_type": "code",
+                            "blocking": self._is_blocking(violation.severity, enforcement_mode),
+                        }
+                    )
+                )
+                continue
+            filtered.append(
+                violation.model_copy(
+                    update={
+                        "blocking": False,
+                        "severity": GovernanceSeverity.WARNING,
+                        "reason": f"{violation.reason} (downgraded: no controller code evidence)",
+                        "content_type": "docs",
+                    }
+                )
+            )
+        return filtered
 
     def _is_blocking(self, severity: GovernanceSeverity, mode: str) -> bool:
         normalized = mode.strip().lower() if mode else "balanced"
