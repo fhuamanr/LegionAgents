@@ -12,12 +12,33 @@ export function useExecutionStream(workflowId: string, seedEvents: readonly Exec
   }, [seedEvents]);
 
   useEffect(() => {
+    let pending: ExecutionEvent[] = [];
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = (): void => {
+      if (pending.length === 0) return;
+      const batch = pending;
+      pending = [];
+      setEvents((current) => [...batch.reverse(), ...current].slice(0, 800));
+    };
+
     const stream = connectExecutionStream(workflowId, (event) => {
-      setEvents((current) => [event, ...current].slice(0, 50));
+      pending.push(event);
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        flush();
+      }, 120);
     });
 
     if (stream) {
-      return () => stream.close();
+      return () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        flush();
+        stream.close();
+      };
     }
 
     return undefined;

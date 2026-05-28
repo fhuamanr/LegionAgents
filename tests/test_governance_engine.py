@@ -485,3 +485,7 @@ async def test_real_secret_still_blocks_without_repair() -> None:
         structured_output=output,
     )
     assert result.valid is False
+    violations = result.metadata.get("violations", ())
+    assert violations
+    assert any(item.get("classification") in {"blocking", "critical"} for item in violations if isinstance(item, dict))
+    assert any(item.get("repairable") is True for item in violations if isinstance(item, dict))

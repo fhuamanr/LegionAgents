@@ -15,10 +15,29 @@ export function useWorkflowTelemetry(
   }, [seedSnapshot]);
 
   useEffect(() => {
-    const stream = connectWorkflowTelemetryStream(workflowId, setSnapshot);
+    let latest: WorkflowTelemetrySnapshot | null = null;
+    let rafId: number | null = null;
+    const flush = (): void => {
+      if (!latest) return;
+      setSnapshot(latest);
+      latest = null;
+      rafId = null;
+    };
+    const stream = connectWorkflowTelemetryStream(workflowId, (incoming) => {
+      latest = incoming;
+      if (rafId != null) return;
+      rafId = window.requestAnimationFrame(flush);
+    });
 
     if (stream) {
-      return () => stream.close();
+      return () => {
+        if (rafId != null) {
+          window.cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        flush();
+        stream.close();
+      };
     }
 
     return undefined;

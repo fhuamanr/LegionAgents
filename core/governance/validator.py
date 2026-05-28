@@ -108,6 +108,7 @@ class PolicyValidator:
                     reason=reason,
                     suggested_fix="Adjust output to satisfy the required governance constraint.",
                     blocking=self._is_blocking(severity, mode),
+                    classification="blocking" if self._is_blocking(severity, mode) else "warning",
                 )
                 if violation.blocking and self._weak_blocking_evidence(violation):
                     violation = violation.model_copy(
@@ -166,6 +167,8 @@ class PolicyValidator:
                             reason=reason,
                             suggested_fix="Remove forbidden content and follow policy guidance.",
                             blocking=self._is_blocking(rule.severity, mode),
+                            repairable="secret" in rule.id or "credential" in rule.id or "token" in rule.id,
+                            classification="critical" if rule.severity == GovernanceSeverity.CRITICAL else ("blocking" if self._is_blocking(rule.severity, mode) else "warning"),
                         )
                     )
         return violations
@@ -321,6 +324,8 @@ class PolicyValidator:
                         reason=reason,
                         suggested_fix="Move orchestration/domain logic to use cases/services and keep controllers thin.",
                         blocking=self._is_blocking(severity, mode),
+                        classification="blocking" if self._is_blocking(severity, mode) else "needs_review",
+                        content_type="code",
                     )
                 )
             if re.search(r"\bselect\s+\*\s+from\b", combined):
@@ -334,6 +339,8 @@ class PolicyValidator:
                         reason=reason,
                         suggested_fix="Move data access into repository/infrastructure boundaries.",
                         blocking=self._is_blocking(severity, mode),
+                        classification="blocking" if self._is_blocking(severity, mode) else "needs_review",
+                        content_type="code",
                     )
                 )
         return errors
@@ -512,6 +519,8 @@ class PolicyValidator:
                 "content_type": content_type,
                 "evidence": f"{key}=<redacted>",
                 "matched_text": key,
+                "repairable": True,
+                "classification": "critical" if violation.severity == GovernanceSeverity.CRITICAL else ("blocking" if self._is_blocking(violation.severity, enforcement_mode) else "repairable"),
             }
         )
 
@@ -615,4 +624,5 @@ class PolicyValidator:
         GovernanceSeverity.WARNING: 1,
         GovernanceSeverity.NEEDS_REVIEW: 2,
         GovernanceSeverity.BLOCKING: 3,
+        GovernanceSeverity.CRITICAL: 4,
     }

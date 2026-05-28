@@ -6,9 +6,14 @@ import type { AgentStatus, AgentSummary } from "@/lib/types";
 
 const statusIcon: Record<AgentStatus, typeof CircleDot> = {
   idle: CircleDashed,
+  waiting_for_upstream: CircleDashed,
+  queued: CircleDashed,
   running: CircleDot,
+  validating: CircleDot,
+  repairing: CircleAlert,
   blocked: CircleAlert,
   completed: CircleCheck,
+  completed_with_warnings: CircleAlert,
   failed: CircleX,
 };
 
@@ -30,7 +35,17 @@ export function AgentStatusGrid({ agents }: Readonly<{ agents: readonly AgentSum
                     <CardTitle>{agent.name}</CardTitle>
                     <CardDescription>{agent.currentTask}</CardDescription>
                   </div>
-                  <Badge variant={agent.status === "failed" ? "destructive" : agent.status === "completed" ? "success" : "default"}>
+                  <Badge
+                    variant={
+                      agent.status === "failed" || agent.status === "blocked"
+                        ? "destructive"
+                        : agent.status === "completed"
+                          ? "success"
+                          : agent.status === "completed_with_warnings" || agent.status === "repairing"
+                            ? "warning"
+                            : "default"
+                    }
+                  >
                     <Icon className="mr-1 h-3 w-3" aria-hidden="true" />
                     {agent.status}
                   </Badge>
@@ -44,6 +59,14 @@ export function AgentStatusGrid({ agents }: Readonly<{ agents: readonly AgentSum
                 <div>
                   <div className="text-muted-foreground">Retries</div>
                   <div className="mt-1 font-medium">{agent.retryCount}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Runtime phase</div>
+                  <div className="mt-1 font-medium">{agent.currentTask || "not available"}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Provider/model</div>
+                  <div className="mt-1 font-medium">not available</div>
                 </div>
               </CardContent>
             </Card>

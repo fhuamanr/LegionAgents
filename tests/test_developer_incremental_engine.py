@@ -49,10 +49,33 @@ def test_developer_generated_project_bundle_contains_required_artifacts() -> Non
     assert "generated_project/api_implementation_matrix.md" in files
     assert "generated_project/database_implementation_matrix.md" in files
     assert "generated_project/frontend_route_matrix.md" in files
+    assert "generated_project/developer_depth_analysis.md" in files
     assert "generated_project/frontend/src/routes/Home.tsx" in files
     assert "generated_project/frontend/src/routes/Checkout.tsx" in files
     assert "generated_project/backend/src/main.py" in files
     assert "generated_project/backend/src/api/routes/checkout.py" in files
+
+
+def test_developer_implementation_deepening_mode_focuses_on_depth() -> None:
+    runtime = _build_runtime()
+    bundle = runtime._generated_project_files(  # noqa: SLF001
+        {
+            "developer_handoff.md": "Deepen checkout and persistence",
+            "openapi_draft.yaml": "openapi: 3.0.3",
+            "backend_architecture.md": "api/application/domain/infrastructure",
+            "frontend_architecture.md": "home/login/catalog/checkout",
+            "database_design.md": "users products orders carts payments",
+            "api_contracts.md": "POST /api/checkout",
+            "module_decomposition.md": "checkout module",
+        },
+        mode="implementation_deepening_mode",
+    )
+    files = bundle["files"]
+    assert "generated_project/developer_depth_analysis.md" in files
+    assert "generated_project/developer_quality_report.md" in files
+    assert any(path.startswith("generated_project/backend/") for path in files)
+    assert any(path.startswith("generated_project/frontend/src/") for path in files)
+    assert "generated_project/qa_handoff.md" in files
 
 
 def test_developer_requires_non_empty_architect_inputs() -> None:

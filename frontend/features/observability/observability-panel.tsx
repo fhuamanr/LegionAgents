@@ -6,13 +6,15 @@ import { formatDuration } from "@/lib/utils";
 import type { ObservabilitySummary } from "@/lib/types";
 
 export function ObservabilityPanel({ observability }: Readonly<{ observability: ObservabilitySummary }>): JSX.Element {
+  const tokenUsageAvailable = observability.workflow.tokenUsage.totalTokens > 0;
+  const promptEstimateAvailable = observability.workflow.promptTelemetry.estimatedTokens > 0;
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>
             <CardTitle>Observability</CardTitle>
-            <CardDescription>Metrics, tracing, analytics, errors, token usage, and prompt sizes</CardDescription>
+            <CardDescription>Runtime telemetry (real metrics first, estimates explicitly labeled)</CardDescription>
           </div>
           <Badge variant="success">OpenTelemetry-ready</Badge>
         </div>
@@ -25,8 +27,16 @@ export function ObservabilityPanel({ observability }: Readonly<{ observability: 
           <Metric label="QA rejection rate" value={`${Math.round(observability.workflow.qaRejectionRate * 100)}%`} />
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <Metric label="Token usage" value={observability.workflow.tokenUsage.totalTokens.toLocaleString()} icon={<Gauge className="h-4 w-4" />} />
-          <Metric label="Prompt estimate" value={observability.workflow.promptTelemetry.estimatedTokens.toLocaleString()} icon={<BarChart3 className="h-4 w-4" />} />
+          <Metric
+            label="Token usage"
+            value={tokenUsageAvailable ? observability.workflow.tokenUsage.totalTokens.toLocaleString() : "not available"}
+            icon={<Gauge className="h-4 w-4" />}
+          />
+          <Metric
+            label="Prompt estimate (estimated)"
+            value={promptEstimateAvailable ? observability.workflow.promptTelemetry.estimatedTokens.toLocaleString() : "not available"}
+            icon={<BarChart3 className="h-4 w-4" />}
+          />
         </div>
         <div className="mt-5 space-y-3">
           {observability.agents.map((agent) => (
@@ -36,25 +46,29 @@ export function ObservabilityPanel({ observability }: Readonly<{ observability: 
                   <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
                   {agent.agentName}
                 </div>
-                <Badge variant={agent.failures ? "destructive" : "muted"}>{formatDuration(agent.averageExecutionTimeMs)}</Badge>
+                <Badge variant={agent.failures ? "destructive" : "muted"}>{agent.averageExecutionTimeMs > 0 ? formatDuration(agent.averageExecutionTimeMs) : "not available"}</Badge>
               </div>
               <div className="mt-3 grid gap-2 text-xs sm:grid-cols-4">
                 <span>started {agent.executionsStarted}</span>
                 <span>completed {agent.executionsCompleted}</span>
                 <span>retries {agent.retries}</span>
-                <span>tokens {agent.tokenUsage.totalTokens.toLocaleString()}</span>
+                <span>tokens {agent.tokenUsage.totalTokens > 0 ? agent.tokenUsage.totalTokens.toLocaleString() : "not available"}</span>
               </div>
             </div>
           ))}
         </div>
-        <div className="mt-5 flex flex-wrap gap-2">
-          {observability.metrics.map((metric) => (
-            <Badge key={metric} variant="default">
-              <RadioTower className="mr-1 h-3 w-3" aria-hidden="true" />
-              {metric}
-            </Badge>
-          ))}
-        </div>
+        {observability.metrics.length > 0 ? (
+          <div className="mt-5 flex flex-wrap gap-2">
+            {observability.metrics.map((metric) => (
+              <Badge key={metric} variant="default">
+                <RadioTower className="mr-1 h-3 w-3" aria-hidden="true" />
+                {metric}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-4 text-xs text-muted-foreground">No additional runtime metrics available yet.</div>
+        )}
       </CardContent>
     </Card>
   );

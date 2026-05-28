@@ -12,6 +12,13 @@ const severityVariant: Record<Severity, "default" | "success" | "warning" | "des
 };
 
 export function QaReportViewer({ report }: Readonly<{ report: QaReport }>): JSX.Element {
+  const noDataYet =
+    report.unitTests === 0 &&
+    report.integrationTests === 0 &&
+    report.browserTests === 0 &&
+    report.bugs.length === 0 &&
+    report.coveragePercent === 0;
+
   return (
     <Card>
       <CardHeader>
@@ -26,12 +33,16 @@ export function QaReportViewer({ report }: Readonly<{ report: QaReport }>): JSX.
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-3 sm:grid-cols-4">
-          <Metric label="Coverage" value={`${report.coveragePercent}%`} />
-          <Metric label="Unit" value={String(report.unitTests)} />
-          <Metric label="Integration" value={String(report.integrationTests)} />
-          <Metric label="Browser" value={String(report.browserTests)} />
-        </div>
+        {noDataYet && report.status === "running" ? (
+          <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">QA has not executed yet.</div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-4">
+            <Metric label="Coverage" value={report.coveragePercent > 0 ? `${report.coveragePercent}%` : "not available"} />
+            <Metric label="Unit" value={report.unitTests > 0 ? String(report.unitTests) : "not available"} />
+            <Metric label="Integration" value={report.integrationTests > 0 ? String(report.integrationTests) : "not available"} />
+            <Metric label="Browser" value={report.browserTests > 0 ? String(report.browserTests) : "not available"} />
+          </div>
+        )}
         <div className="mt-5 space-y-3">
           {report.bugs.map((bug) => (
             <div key={bug.id} className="rounded-md border bg-background p-4">

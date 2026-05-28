@@ -2,8 +2,10 @@ import { AppShell } from "@/components/layout/app-shell";
 import { AgentStatusGrid } from "@/features/agents/agent-status-grid";
 import { ApprovalGatesPanel } from "@/features/approvals/approval-gates-panel";
 import { MetricStrip } from "@/features/dashboard/metric-strip";
+import { ExecutionSummaryHeader } from "@/features/dashboard/execution-summary-header";
 import { MermaidDiagram } from "@/features/diagrams/mermaid-diagram";
 import { ExecutionTimeline } from "@/features/executions/execution-timeline";
+import { WorkflowArtifactsPanel } from "@/features/executions/workflow-artifacts-panel";
 import { LiveLogViewer } from "@/features/executions/live-log-viewer";
 import { ObservabilityPanel } from "@/features/observability/observability-panel";
 import { GeneratedDocsViewer } from "@/features/docs/generated-docs-viewer";
@@ -11,7 +13,7 @@ import { PrSummaryPanel } from "@/features/pr/pr-summary-panel";
 import { QaReportViewer } from "@/features/qa/qa-report-viewer";
 import { LiveWorkflowVisualization } from "@/features/workflows/live-workflow-visualization";
 import { WorkflowMap } from "@/features/workflows/workflow-map";
-import { getDashboardSnapshot, getProviderManagementSnapshot } from "@/lib/api";
+import { getDashboardSnapshot, getProviderManagementSnapshot, getWorkflowArtifacts } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -19,12 +21,14 @@ import { ServerCog, TriangleAlert } from "lucide-react";
 
 export default async function DashboardPage(): Promise<JSX.Element> {
   const [snapshot, providers] = await Promise.all([getDashboardSnapshot(), getProviderManagementSnapshot()]);
+  const artifacts = await getWorkflowArtifacts(snapshot.workflowId);
   const providerReady = providers.checks.some((check) => check.status === "ok");
 
   return (
     <AppShell>
       <div className="space-y-6">
         {!providerReady ? <ProviderSetupBanner /> : null}
+        <ExecutionSummaryHeader snapshot={snapshot} />
         <MetricStrip snapshot={snapshot} />
         <LiveWorkflowVisualization workflowId={snapshot.workflowId} snapshot={snapshot.visualization} />
         <WorkflowMap stages={snapshot.stages} />
@@ -32,9 +36,10 @@ export default async function DashboardPage(): Promise<JSX.Element> {
         <ApprovalGatesPanel approvals={snapshot.approvals} />
         <ObservabilityPanel observability={snapshot.observability} />
         <div className="grid gap-6 xl:grid-cols-[1fr_28rem]">
-          <ExecutionTimeline items={snapshot.timeline} />
+          <ExecutionTimeline items={snapshot.timeline} events={snapshot.events} />
           <QaReportViewer report={snapshot.qaReport} />
         </div>
+        <WorkflowArtifactsPanel workflowId={snapshot.workflowId} artifacts={artifacts} />
         <LiveLogViewer workflowId={snapshot.workflowId} logs={snapshot.logs} events={snapshot.events} />
         <div className="grid gap-6 xl:grid-cols-2">
           <MermaidDiagram chart={snapshot.mermaid} />

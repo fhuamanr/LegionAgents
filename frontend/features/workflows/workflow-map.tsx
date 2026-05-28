@@ -5,8 +5,12 @@ import type { WorkflowStage, WorkflowStageStatus } from "@/lib/types";
 
 const statusVariant: Record<WorkflowStageStatus, "default" | "success" | "warning" | "destructive" | "muted"> = {
   pending: "muted",
+  queued: "muted",
   running: "default",
+  repairing: "warning",
   completed: "success",
+  completed_with_warnings: "warning",
+  blocked: "destructive",
   rejected: "warning",
   failed: "destructive",
 };

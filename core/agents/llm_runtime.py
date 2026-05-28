@@ -122,6 +122,99 @@ class LLMStructuredAgentRuntime(BaseAgent[BaseModel]):
         return metadata
 
 
+class QAAgentRuntime(LLMStructuredAgentRuntime):
+    """QA runtime that emits structured fix requests for targeted developer continuation."""
+
+    async def build_artifacts(
+        self,
+        request: AgentExecutionRequest,
+        output: BaseModel,
+    ) -> tuple[Artifact, ...]:
+        base = await super().build_artifacts(request, output)
+        if not isinstance(output, QAOutput):
+            return base
+        fix_requests = self._build_structured_fix_requests(output)
+        return (
+            *base,
+            Artifact(
+                id=f"qa-fix-requests-{request.execution_id}",
+                kind=ArtifactKind.TEST_REPORT,
+                name="structured_fix_requests.json",
+                producer_agent=self.config.name,
+                content=json.dumps({"fix_requests": fix_requests}, indent=2, ensure_ascii=False),
+                metadata={"count": len(fix_requests)},
+            ),
+        )
+
+    def result_metadata(self, output: BaseModel) -> dict[str, object]:
+        metadata = super().result_metadata(output)
+        if not isinstance(output, QAOutput):
+            return metadata
+        fix_requests = self._build_structured_fix_requests(output)
+        metadata["structured_fix_requests"] = fix_requests
+        if not output.passed:
+            primary = fix_requests[0] if fix_requests else {}
+            metadata["retry_reason"] = str(primary.get("title", "QA reported unresolved issues"))
+            metadata["impacted_files"] = list(primary.get("impacted_files", []))[:12]
+            metadata["impacted_modules"] = list(primary.get("impacted_modules", []))[:8]
+        return metadata
+
+    def _build_structured_fix_requests(self, output: QAOutput) -> list[dict[str, Any]]:
+        requests: list[dict[str, Any]] = []
+        for finding in output.findings:
+            evidence = (finding.evidence or "").strip()
+            impacted_files = self._extract_paths_from_text(evidence)
+            requests.append(
+                {
+                    "id": finding.id,
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "recommended_fix": finding.recommendation or "Add targeted validation and regression coverage.",
+                    "failing_flows": [finding.title],
+                    "impacted_files": impacted_files,
+                    "impacted_modules": self._modules_from_paths(impacted_files),
+                    "missing_validations": [finding.title] if "valid" in finding.title.lower() else [],
+                    "frontend_ux_issues": [finding.title] if any(word in finding.title.lower() for word in ("ux", "ui", "form")) else [],
+                }
+            )
+        return requests[:12]
+
+    def _extract_paths_from_text(self, text: str) -> list[str]:
+        candidates: list[str] = []
+        for token in text.replace("\n", " ").split(" "):
+            value = token.strip("`'\".,:;()[]{}")
+            if "/" not in value:
+                continue
+            if any(value.endswith(ext) for ext in (".py", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml")):
+                candidates.append(value)
+        # preserve order while deduping
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for item in candidates:
+            if item in seen:
+                continue
+            seen.add(item)
+            ordered.append(item)
+        return ordered[:12]
+
+    def _modules_from_paths(self, paths: list[str]) -> list[str]:
+        modules: list[str] = []
+        for path in paths:
+            parts = [part for part in path.split("/") if part]
+            if len(parts) >= 3:
+                modules.append(parts[-2])
+            elif parts:
+                modules.append(parts[0])
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for module in modules:
+            if module in seen:
+                continue
+            seen.add(module)
+            deduped.append(module)
+        return deduped[:8]
+
+
 class BusinessAnalystAgentRuntime(LLMStructuredAgentRuntime):
     """BA runtime with advanced functional-analysis intelligence outputs."""
 
@@ -464,8 +557,10 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
         upstream = resolved_inputs
         implementation_mode = str(request.metadata.get("developer_mode", "implement_core")).strip().lower() or "implement_core"
         local_safe_mode = bool(request.metadata.get("local_lm_studio_safe_mode", False))
+        fix_requests = request.metadata.get("qa_structured_fix_requests", [])
+        repair_scope = self._repair_scope_from_fix_requests(fix_requests)
         passes_executed = self._passes_for_mode(implementation_mode, local_safe_mode)
-        generated = self._generated_project_files(upstream, mode=implementation_mode)
+        generated = self._generated_project_files(upstream, mode=implementation_mode, repair_scope=repair_scope)
 
         code_changes = list(payload.get("code_changes", [])) if isinstance(payload.get("code_changes", []), list) else []
         existing_paths = {str(item.get("path", "")) for item in code_changes if isinstance(item, dict)}
@@ -511,6 +606,9 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
                 "quality_report": generated["quality_report"],
                 "handoff": generated["qa_handoff"],
                 "implementation_mode": implementation_mode,
+                "targeted_repair_mode": bool(request.metadata.get("targeted_repair_mode", False)),
+                "repair_scope_files": repair_scope,
+                "retry_reason": str(request.metadata.get("retry_reason", "")),
             }
         )
         payload["metadata"] = metadata
@@ -656,9 +754,17 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
             return ["tests"]
         if mode == "continue_existing":
             return ["continuation_scan", "targeted_updates", "tests"]
+        if mode == "implementation_deepening_mode":
+            return [
+                "continuation_scan",
+                "backend_deepening",
+                "frontend_deepening",
+                "integration_hardening",
+                "test_deepening",
+            ]
         return ["scaffold", "backend_core"] if local_safe_mode else ["scaffold", "backend_core", "frontend_core", "integration_wiring", "hardening", "tests"]
 
-    def _generated_project_files(self, docs: dict[str, str], *, mode: str) -> dict[str, Any]:
+    def _generated_project_files(self, docs: dict[str, str], *, mode: str, repair_scope: list[str] | None = None) -> dict[str, Any]:
         backend_arch = docs.get("backend_architecture.md", "")
         frontend_arch = docs.get("frontend_architecture.md", "")
         api_contracts = docs.get("api_contracts.md", "")
@@ -839,12 +945,150 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
                 for key, value in files.items()
                 if key.startswith("generated_project/tests/") or key.endswith("qa_handoff.md") or key.endswith("developer_quality_report.md")
             }
+        elif mode in {"continue_existing", "implementation_deepening_mode", "harden", "refactor"}:
+            files = {
+                key: value
+                for key, value in files.items()
+                if key.startswith("generated_project/backend/")
+                or key.startswith("generated_project/frontend/src/")
+                or key.startswith("generated_project/tests/")
+                or key.endswith("api_implementation_matrix.md")
+                or key.endswith("database_implementation_matrix.md")
+                or key.endswith("frontend_route_matrix.md")
+                or key.endswith("developer_quality_report.md")
+                or key.endswith("qa_handoff.md")
+                or key.endswith("run_instructions.md")
+                or key.endswith("continuation_plan.md")
+            }
+        if mode == "continue_existing" and repair_scope:
+            scope_set = set(repair_scope)
+            files = {
+                key: value
+                for key, value in files.items()
+                if key in scope_set
+                or key.endswith("api_implementation_matrix.md")
+                or key.endswith("database_implementation_matrix.md")
+                or key.endswith("frontend_route_matrix.md")
+                or key.endswith("developer_quality_report.md")
+                or key.endswith("developer_depth_analysis.md")
+                or key.endswith("qa_handoff.md")
+                or key.endswith("continuation_plan.md")
+            }
+        depth_analysis = self._build_developer_depth_analysis(files=files, tests=tests)
+        quality_report = self._build_developer_quality_report(files=files, tests=tests)
+        files["generated_project/developer_depth_analysis.md"] = depth_analysis
+        files["generated_project/developer_quality_report.md"] = quality_report
+        files["generated_project/qa_handoff.md"] = self._build_qa_handoff(files=files)
         return {
             "files": files,
             "tests": tests,
-            "quality_report": files["generated_project/developer_quality_report.md"],
+            "quality_report": quality_report,
             "qa_handoff": files["generated_project/qa_handoff.md"],
         }
+
+    def _repair_scope_from_fix_requests(self, fix_requests: Any) -> list[str]:
+        if not isinstance(fix_requests, list):
+            return []
+        scope: list[str] = []
+        for item in fix_requests:
+            if not isinstance(item, dict):
+                continue
+            impacted = item.get("impacted_files", [])
+            if not isinstance(impacted, list):
+                continue
+            for raw in impacted:
+                path = str(raw).strip().replace("\\", "/")
+                if not path:
+                    continue
+                if not path.startswith("generated_project/"):
+                    path = f"generated_project/{path.lstrip('/')}"
+                scope.append(path)
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for path in scope:
+            if path in seen:
+                continue
+            seen.add(path)
+            deduped.append(path)
+        return deduped[:40]
+
+    def _build_developer_depth_analysis(self, *, files: dict[str, str], tests: dict[str, str]) -> str:
+        shallow_files: list[str] = []
+        placeholder_files: list[str] = []
+        strong_files: list[str] = []
+        weak_areas: list[str] = []
+        for path, content in files.items():
+            text = str(content or "")
+            size = len(text.encode("utf-8"))
+            lowered = text.lower()
+            if size < 180:
+                shallow_files.append(path)
+            if "todo" in lowered or "return []" in lowered or "<h1>" in lowered:
+                placeholder_files.append(path)
+            if size > 500 and any(token in lowered for token in ("validation", "error", "checkout", "router", "response")):
+                strong_files.append(path)
+        if not any("checkout.py" in path for path in files):
+            weak_areas.append("checkout workflow implementation missing.")
+        if not any("repositories" in path for path in files):
+            weak_areas.append("repository/persistence layer missing.")
+        if not any("frontend/src/routes/Cart.tsx" in path for path in files):
+            weak_areas.append("cart UX route missing.")
+        if not any("test_checkout" in path for path in tests):
+            weak_areas.append("checkout test coverage missing.")
+        return (
+            "# Developer Depth Analysis\n\n"
+            "## Shallow Files\n"
+            + ("\n".join(f"- {item}" for item in shallow_files[:20]) or "- none")
+            + "\n\n## Placeholder Files\n"
+            + ("\n".join(f"- {item}" for item in placeholder_files[:20]) or "- none")
+            + "\n\n## Strong Files\n"
+            + ("\n".join(f"- {item}" for item in strong_files[:20]) or "- none")
+            + "\n\n## Weak Implementation Areas\n"
+            + ("\n".join(f"- {item}" for item in weak_areas) or "- none")
+            + "\n\n## Missing Business Logic\n- payment integration adapter\n- order state transitions\n"
+            + "## Missing Persistence\n- production repository implementation\n- migration strategy\n"
+            + "## Missing Frontend UX States\n- retry UX for checkout/cart APIs\n- richer empty states and auth recovery\n"
+            + "## Missing Validations\n- stronger DTO constraints and semantic validations\n"
+            + "## Missing Integration Logic\n- idempotency persistence + stock reservation workflow\n"
+        )
+
+    def _build_developer_quality_report(self, *, files: dict[str, str], tests: dict[str, str]) -> str:
+        code_paths = [path for path in files if path.endswith((".py", ".ts", ".tsx", ".md", ".yml", ".yaml"))]
+        tiny = sum(1 for path in code_paths if len(files[path].encode("utf-8")) < 100)
+        placeholder = sum(1 for path in code_paths if any(marker in files[path].lower() for marker in ("todo", "stub", "return []", "<h1>")))
+        assertions = sum(1 for content in tests.values() if "assert " in content or "expect(" in content)
+        depth_score = max(0, 100 - (tiny * 3) - (placeholder * 5) + min(assertions * 2, 20))
+        return (
+            "# Developer Quality Report\n\n"
+            f"- Depth score: {depth_score}/100\n"
+            f"- Tiny files (<100 bytes): {tiny}\n"
+            f"- Placeholder detections: {placeholder}\n"
+            f"- Test assertion coverage signals: {assertions}\n"
+            f"- Persistence completeness: {'partial' if any('repositories' in p for p in files) else 'low'}\n"
+            f"- Integration completeness: {'partial' if any('checkout.py' in p for p in files) else 'low'}\n"
+            "- Next increment priority: deepen checkout/order lifecycle, auth/session persistence, and API error taxonomy.\n"
+        )
+
+    def _build_qa_handoff(self, *, files: dict[str, str]) -> str:
+        implemented = [path for path in files if "/api/routes/" in path and path.endswith(".py")]
+        risky = [
+            "backend/src/application/use_cases/checkout.py",
+            "backend/src/api/routes/checkout.py",
+            "frontend/src/routes/Checkout.tsx",
+            "frontend/src/routes/Cart.tsx",
+        ]
+        existing_risky = [item for item in risky if any(item in path for path in files)]
+        return (
+            "# QA Handoff\n\n"
+            "## Implemented Flows\n"
+            + ("\n".join(f"- {item}" for item in implemented) or "- none")
+            + "\n\n## Weak Flows\n- checkout failure and retry\n- cart ownership/session enforcement\n\n"
+            "## Known Gaps\n- persistence adapters are still partial\n- payment workflow is simplified\n\n"
+            "## Risky Modules\n"
+            + ("\n".join(f"- {item}" for item in existing_risky) or "- none")
+            + "\n\n## Missing Validations\n- semantic payload checks beyond shape validation\n\n"
+            "## Priority Regression Flows\n- login -> catalog -> cart -> checkout\n- invalid checkout payload -> structured error response\n"
+        )
 
     def _auto_repair_governance_secrets(self, output: DeveloperOutput) -> tuple[DeveloperOutput, dict[str, Any]]:
         payload = output.model_dump(mode="json")
@@ -1149,7 +1393,15 @@ def build_llm_agent_runtimes(
     )
 
     runtimes: dict[str, LLMStructuredAgentRuntime] = {
-        name: (BusinessAnalystAgentRuntime if name == "ba" else SolutionArchitectAgentRuntime if name == "architect" else LLMStructuredAgentRuntime)(
+        name: (
+            BusinessAnalystAgentRuntime
+            if name == "ba"
+            else SolutionArchitectAgentRuntime
+            if name == "architect"
+            else QAAgentRuntime
+            if name == "qa"
+            else LLMStructuredAgentRuntime
+        )(
             config=RuntimeAgentConfig(
                 name=name,
                 role=role,

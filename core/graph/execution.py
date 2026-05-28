@@ -247,6 +247,21 @@ class LangGraphExecutionRuntime:
                 "execution_owner": self._execution_owner,
             },
         )
+        if agent_name == "developer" and self._is_targeted_continuation(state):
+            request = request.model_copy(
+                update={
+                    "metadata": {
+                        **request.metadata,
+                        "developer_mode": "continue_existing",
+                        "targeted_repair_mode": True,
+                        "continuation_mode": "qa_targeted_repair",
+                        "qa_structured_fix_requests": state.get("metadata", {}).get("qa_structured_fix_requests", []),
+                        "retry_reason": state.get("metadata", {}).get("qa_retry_reason", ""),
+                        "impacted_files": state.get("metadata", {}).get("qa_impacted_files", []),
+                        "impacted_modules": state.get("metadata", {}).get("qa_impacted_modules", []),
+                    }
+                }
+            )
         profile = await self._profiles.get(agent_name)
         local_compact_mode = bool(request.metadata.get("local_lm_studio_safe_mode", False))
         compact_artifacts = self._context_governor.compact_artifacts_for_handoff(
@@ -332,6 +347,21 @@ class LangGraphExecutionRuntime:
 
         if attempts[agent_name] > 1:
             await self._emit("retry_started", {**state, "next_agent": agent_name, "attempts": attempts})
+        if agent_name == "developer" and self._is_targeted_continuation(state):
+            await self._emit(
+                "continuation_mode_started",
+                {
+                    **state,
+                    "next_agent": agent_name,
+                    "attempts": attempts,
+                    "metadata": {
+                        **dict(state.get("metadata", {})),
+                        "continuation_mode": "qa_targeted_repair",
+                        "retry_reason": dict(state.get("metadata", {})).get("qa_retry_reason", ""),
+                        "impacted_files": dict(state.get("metadata", {})).get("qa_impacted_files", []),
+                    },
+                },
+            )
         await self._emit("agent_started", {**state, "next_agent": agent_name, "attempts": attempts})
         try:
             await self._emit(
@@ -455,6 +485,25 @@ class LangGraphExecutionRuntime:
             "agent_completed" if result.status == AgentStatus.COMPLETED else "agent_failed",
             updated_state,
         )
+        if (
+            result.status == AgentStatus.COMPLETED
+            and agent_name == "qa"
+            and isinstance(result.metadata, dict)
+            and str(result.metadata.get("route_signal", "")).strip().lower() == "reject"
+        ):
+            await self._emit(
+                "qa_feedback_generated",
+                {
+                    **updated_state,
+                    "metadata": {
+                        **dict(updated_state.get("metadata", {})),
+                        "retry_reason": result.metadata.get("retry_reason", "QA requested continuation fixes."),
+                        "impacted_files": result.metadata.get("impacted_files", []),
+                        "impacted_modules": result.metadata.get("impacted_modules", []),
+                        "structured_fix_requests": result.metadata.get("structured_fix_requests", []),
+                    },
+                },
+            )
         if result.status == AgentStatus.COMPLETED:
             await self._emit(
                 "stage_transition",
@@ -548,6 +597,23 @@ class LangGraphExecutionRuntime:
         if last_agent == "qa" and route_signal == "reject":
             rejection_count = int(workflow_state.metadata.get("qa_rejection_count", 0))
             if rejection_count <= self._max_qa_rejection_loops:
+                qa_state = workflow_state.agent_states.get("qa")
+                qa_meta = qa_state.metadata if qa_state is not None else {}
+                qa_fix_requests = qa_meta.get("structured_fix_requests", []) if isinstance(qa_meta, dict) else []
+                qa_retry_reason = qa_meta.get("retry_reason", "QA requested targeted fixes.") if isinstance(qa_meta, dict) else "QA requested targeted fixes."
+                qa_impacted_files = qa_meta.get("impacted_files", []) if isinstance(qa_meta, dict) else []
+                qa_impacted_modules = qa_meta.get("impacted_modules", []) if isinstance(qa_meta, dict) else []
+                current_metadata = dict(state.get("metadata", {}))
+                current_metadata.update(
+                    {
+                        "continuation_mode": "qa_targeted_repair",
+                        "qa_structured_fix_requests": qa_fix_requests,
+                        "qa_retry_reason": qa_retry_reason,
+                        "qa_impacted_files": qa_impacted_files,
+                        "qa_impacted_modules": qa_impacted_modules,
+                    }
+                )
+                state["metadata"] = current_metadata
                 return "developer"
             return self._mark_terminal(state, WorkflowRunStatus.FAILED)
 
@@ -581,6 +647,14 @@ class LangGraphExecutionRuntime:
     def _mark_terminal(self, state: RealWorkflowRuntimeState, status: WorkflowRunStatus) -> Literal[None]:
         state["status"] = status.value
         return None
+
+    def _is_targeted_continuation(self, state: RealWorkflowRuntimeState) -> bool:
+        metadata = dict(state.get("metadata", {}))
+        if str(metadata.get("continuation_mode", "")).strip() == "qa_targeted_repair":
+            return True
+        if metadata.get("qa_structured_fix_requests"):
+            return True
+        return False
 
     async def _persist_state(
         self,

@@ -28,6 +28,7 @@ export function LiveLogViewer({
     }));
   const displayedLogs = liveLogs.length > 0 ? liveLogs : logs;
   const tokenEvents = streamEvents.filter((event) => event.type === "token_streamed");
+  const tokenTotal = tokenEvents.reduce((sum, item) => sum + String(item.message ?? "").length, 0);
   const outputEvents = streamEvents.filter((event) => event.type === "output_generated" || event.type === "telemetry_recorded");
 
   return (
@@ -57,7 +58,10 @@ export function LiveLogViewer({
             ))}
           </div>
           <div className="h-80 overflow-auto rounded-md border bg-background p-3">
-            {streamEvents.map((event) => (
+            {streamEvents
+              .filter((event) => event.type !== "token_streamed")
+              .slice(-120)
+              .map((event) => (
               <div key={event.id} className="mb-3 flex gap-3 rounded-md bg-muted/60 p-3 last:mb-0">
                 <TerminalSquare className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                 <div className="min-w-0">
@@ -75,9 +79,11 @@ export function LiveLogViewer({
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <div className="h-56 overflow-auto rounded-md border bg-background p-3">
             <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">Token stream</div>
-            <pre className="whitespace-pre-wrap font-mono text-xs text-muted-foreground">
-              {tokenEvents.map((event) => event.message).join("") || "Waiting for model tokens from the execution websocket."}
-            </pre>
+            <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+              {tokenEvents.length > 0
+                ? `${tokenEvents.length.toLocaleString()} token_streamed events collapsed · ${tokenTotal.toLocaleString()} streamed token characters.`
+                : "Waiting for model tokens from the execution websocket."}
+            </div>
           </div>
           <div className="h-56 overflow-auto rounded-md border bg-background p-3">
             <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">Generated outputs and QA</div>

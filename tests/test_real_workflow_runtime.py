@@ -141,6 +141,9 @@ async def test_real_workflow_runtime_routes_qa_rejection_back_to_developer() -> 
     assert latest.state.metadata["qa_rejection_count"] == 1
     assert latest.state.agent_states["developer"].attempt == 2
     assert latest.state.agent_states["qa"].attempt == 2
+    developer_meta = latest.state.agent_states["developer"].metadata
+    assert developer_meta.get("targeted_repair_mode") is True
+    assert developer_meta.get("implementation_mode") == "continue_existing"
 
 
 @pytest.mark.asyncio

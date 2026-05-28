@@ -17,13 +17,16 @@ export function LiveWorkflowVisualization({
   snapshot: WorkflowTelemetrySnapshot;
 }>): JSX.Element {
   const telemetry = useWorkflowTelemetry(workflowId, snapshot);
-  const completedAgents = telemetry.nodes.filter((node) => node.status === "completed").length;
-  const failedAgent = telemetry.nodes.find((node) => node.status === "failed" || node.status === "rejected");
+  const completedAgents = telemetry.nodes.filter((node) => node.status === "completed" || node.status === "completed_with_warnings").length;
+  const failedAgent = telemetry.nodes.find((node) => node.status === "failed" || node.status === "blocked");
+  const repairedCount = telemetry.timeline.filter((item) => item.eventType.includes("repair")).length;
   const stageLabel = failedAgent
     ? `Failed at ${failedAgent.label}`
     : telemetry.activeAgent
       ? `${telemetry.activeAgent} running`
-      : telemetry.progressPercent >= 100
+      : telemetry.status === "completed_with_warnings"
+        ? "Completed with warnings"
+        : telemetry.progressPercent >= 100
         ? "Completed"
         : "Queued";
 
@@ -47,6 +50,7 @@ export function LiveWorkflowVisualization({
                 {formatDuration(telemetry.durationMs)}
               </Badge>
               <Badge variant="muted">Completed: {completedAgents}/{telemetry.nodes.length || 6}</Badge>
+              <Badge variant={repairedCount > 0 ? "warning" : "muted"}>Governance repaired: {repairedCount}</Badge>
             </div>
           </div>
         </CardHeader>

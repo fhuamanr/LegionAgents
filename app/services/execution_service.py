@@ -1022,7 +1022,7 @@ class ExecutionService:
             progress_percent=progress_percent,
             duration_ms=self._duration_ms(workflow.created_at, now),
             nodes=nodes,
-            edges=self._telemetry_edges(),
+            edges=self._telemetry_edges(events),
             timeline=self._telemetry_timeline(events),
             mermaid=self._telemetry_mermaid(nodes),
             metadata={
@@ -1098,6 +1098,9 @@ class ExecutionService:
                 "compact_mode_enabled",
                 "stage_transition",
                 "provider_selected_per_agent",
+                "continuation_mode_started",
+                "qa_feedback_generated",
+                "governance_repaired",
             }:
                 payload = self._runtime_event_payload(state, agent_name)
                 payload["event"] = event_name
@@ -1978,10 +1981,47 @@ class ExecutionService:
         started_at: dict[str, datetime] = {}
         completed_at: dict[str, datetime] = {}
         retry_counts = {agent: 0 for agent in self._agent_labels}
+        artifact_counts = {agent: 0 for agent in self._agent_labels}
+        warning_counts = {agent: 0 for agent in self._agent_labels}
+        provider_by_agent = {agent: "n/a" for agent in self._agent_labels}
+        model_by_agent = {agent: "n/a" for agent in self._agent_labels}
+        pass_by_agent = {agent: "n/a" for agent in self._agent_labels}
+        continuation_by_agent = {agent: "none" for agent in self._agent_labels}
+        last_event_by_agent = {agent: "" for agent in self._agent_labels}
+        retry_reason_by_agent = {agent: "" for agent in self._agent_labels}
 
         for event in events:
             if not event.agent_name or event.agent_name not in statuses:
                 continue
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata", {}), dict) else {}
+            provider = str(payload.get("provider_id") or metadata.get("provider_id") or "").strip()
+            model = str(payload.get("model") or metadata.get("model") or "").strip()
+            if provider:
+                provider_by_agent[event.agent_name] = provider
+            if model:
+                model_by_agent[event.agent_name] = model
+            if event.type == ExecutionEventType.OUTPUT_GENERATED:
+                artifact_counts[event.agent_name] = int(payload.get("artifact_count", artifact_counts[event.agent_name]))
+                out_meta = payload.get("metadata", {}) if isinstance(payload.get("metadata", {}), dict) else {}
+                gov = out_meta.get("governance_validation", {}) if isinstance(out_meta.get("governance_validation", {}), dict) else {}
+                warning_count = len(gov.get("warnings", [])) if isinstance(gov.get("warnings", []), list) else 0
+                warning_counts[event.agent_name] = max(warning_counts[event.agent_name], warning_count)
+                if str(out_meta.get("implementation_mode", "")).strip():
+                    pass_by_agent[event.agent_name] = str(out_meta.get("implementation_mode"))
+            if event.type == ExecutionEventType.TELEMETRY_RECORDED:
+                event_name = str(payload.get("event", ""))
+                if event_name == "continuation_mode_started":
+                    continuation_by_agent[event.agent_name] = str(payload.get("continuation_mode", "qa_targeted_repair"))
+                    retry_reason_by_agent[event.agent_name] = str(payload.get("retry_reason", ""))
+                if event_name == "governance_repaired":
+                    warning_counts[event.agent_name] += 1
+                if event_name == "provider_selected_per_agent":
+                    if str(payload.get("provider_id", "")).strip():
+                        provider_by_agent[event.agent_name] = str(payload.get("provider_id"))
+                    if str(payload.get("model", "")).strip():
+                        model_by_agent[event.agent_name] = str(payload.get("model"))
+            last_event_by_agent[event.agent_name] = event.type.value
             if event.type == ExecutionEventType.AGENT_STARTED:
                 statuses[event.agent_name] = WorkflowStatus.RUNNING
                 started_at.setdefault(event.agent_name, event.timestamp)
@@ -2009,19 +2049,43 @@ class ExecutionService:
                 completed_at=completed_at.get(agent),
                 duration_ms=self._duration_ms(started_at[agent], completed_at.get(agent, now)) if agent in started_at else None,
                 retry_count=retry_counts[agent],
-                metadata={"dependency_index": index},
+                metadata={
+                    "dependency_index": index,
+                    "artifact_count": artifact_counts[agent],
+                    "governance_warning_count": warning_counts[agent],
+                    "provider": provider_by_agent[agent],
+                    "model": model_by_agent[agent],
+                    "pass": pass_by_agent[agent],
+                    "continuation_mode": continuation_by_agent[agent],
+                    "last_event": last_event_by_agent[agent] or "n/a",
+                    "retry_reason": retry_reason_by_agent[agent] or "",
+                },
             )
             for index, (agent, label) in enumerate(self._agent_labels.items())
         )
 
-    def _telemetry_edges(self) -> tuple[WorkflowTelemetryEdge, ...]:
+    def _telemetry_edges(self, events: tuple[Any, ...] = tuple()) -> tuple[WorkflowTelemetryEdge, ...]:
+        qa_retry_active = any(
+            event.type == ExecutionEventType.TELEMETRY_RECORDED
+            and event.agent_name == "developer"
+            and isinstance(event.payload, dict)
+            and str(event.payload.get("event", "")) == "continuation_mode_started"
+            for event in events
+        )
         return (
-            WorkflowTelemetryEdge(source="ba", target="architect", label="requirements"),
-            WorkflowTelemetryEdge(source="architect", target="developer", label="architecture"),
-            WorkflowTelemetryEdge(source="developer", target="qa", label="implementation"),
-            WorkflowTelemetryEdge(source="qa", target="docs", label="approved", condition="qa_passed"),
-            WorkflowTelemetryEdge(source="qa", target="developer", label="rejected", condition="qa_failed", is_loop=True),
-            WorkflowTelemetryEdge(source="docs", target="pr", label="documentation"),
+            WorkflowTelemetryEdge(source="ba", target="architect", label="completed handoff", condition="ready"),
+            WorkflowTelemetryEdge(source="architect", target="developer", label="completed handoff", condition="ready"),
+            WorkflowTelemetryEdge(source="developer", target="qa", label="active validation", condition="ready"),
+            WorkflowTelemetryEdge(source="qa", target="docs", label="completed handoff", condition="qa_passed"),
+            WorkflowTelemetryEdge(
+                source="qa",
+                target="developer",
+                label="continuation loop" if qa_retry_active else "waiting loop",
+                condition="qa_failed",
+                is_loop=True,
+                metadata={"loop_type": "qa_repair_cycle", "state": "active" if qa_retry_active else "idle"},
+            ),
+            WorkflowTelemetryEdge(source="docs", target="pr", label="completed handoff", condition="ready"),
         )
 
     def _telemetry_timeline(self, events: tuple[Any, ...]) -> tuple[WorkflowTelemetryTimelineItem, ...]:

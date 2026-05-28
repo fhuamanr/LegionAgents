@@ -34,6 +34,7 @@ class GovernanceSeverity(StrEnum):
     WARNING = "warning"
     NEEDS_REVIEW = "needs_review"
     BLOCKING = "blocking"
+    CRITICAL = "critical"
 
 
 class RuleCategory(StrEnum):
@@ -102,6 +103,8 @@ class GovernanceViolation(ContractBaseModel):
     reason: str = Field(min_length=1)
     suggested_fix: str = ""
     blocking: bool = False
+    repairable: bool = False
+    classification: str = ""
     artifact_path: str = ""
     content_type: str = ""
     safe_phrase_detected: bool = False

@@ -1,11 +1,25 @@
 export type AgentKey = "ba" | "architect" | "developer" | "qa" | "docs" | "pr";
 
-export type AgentStatus = "idle" | "running" | "blocked" | "completed" | "failed";
+export type AgentStatus =
+  | "idle"
+  | "waiting_for_upstream"
+  | "queued"
+  | "running"
+  | "validating"
+  | "repairing"
+  | "blocked"
+  | "completed"
+  | "completed_with_warnings"
+  | "failed";
 
 export type WorkflowStageStatus =
   | "pending"
+  | "queued"
   | "running"
   | "completed"
+  | "completed_with_warnings"
+  | "blocked"
+  | "repairing"
   | "rejected"
   | "failed";
 
@@ -67,7 +81,18 @@ export interface WorkflowTelemetryNode {
   readonly id: AgentKey;
   readonly label: string;
   readonly agentName: AgentKey;
-  readonly status: "pending" | "running" | "paused" | "completed" | "failed";
+  readonly status:
+    | "pending"
+    | "queued"
+    | "waiting_for_upstream"
+    | "running"
+    | "validating"
+    | "repairing"
+    | "paused"
+    | "completed"
+    | "completed_with_warnings"
+    | "blocked"
+    | "failed";
   readonly startedAt?: string;
   readonly completedAt?: string;
   readonly durationMs?: number;
@@ -96,7 +121,21 @@ export interface WorkflowTelemetryTimelineItem {
 
 export interface WorkflowTelemetrySnapshot {
   readonly workflowId: string;
-  readonly status: "pending" | "running" | "paused" | "completed" | "failed";
+  readonly status:
+    | "pending"
+    | "preparing"
+    | "resolving_artifacts"
+    | "waiting_for_upstream"
+    | "queued"
+    | "running"
+    | "validating"
+    | "repairing"
+    | "paused"
+    | "completed"
+    | "completed_with_warnings"
+    | "blocked"
+    | "failed"
+    | "cancelled";
   readonly activeAgent?: AgentKey;
   readonly progressPercent: number;
   readonly durationMs: number;
