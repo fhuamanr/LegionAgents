@@ -12,8 +12,16 @@ export default function RootLayout({
 }: Readonly<{
   children: ReactNode;
 }>): JSX.Element {
+  const debugOverlayEnabled =
+    process.env.FRONTEND_DEBUG_OVERLAY !== "false" &&
+    process.env.NEXT_PUBLIC_FRONTEND_DEBUG_OVERLAY !== "false";
+
   return (
-    <html lang="en" className="dark">
+    <html
+      lang="en"
+      className="dark"
+      data-debug-overlay={debugOverlayEnabled ? "true" : "false"}
+    >
       <body>{children}</body>
     </html>
   );

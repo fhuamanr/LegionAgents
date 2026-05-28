@@ -56,3 +56,13 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+/* Demo-safe mode: hide intrusive Next.js dev overlays while preserving logs. */
+html[data-debug-overlay="false"] nextjs-portal,
+html[data-debug-overlay="false"] #__next-build-watcher,
+html[data-debug-overlay="false"] [data-nextjs-dialog-overlay],
+html[data-debug-overlay="false"] [data-nextjs-dialog],
+html[data-debug-overlay="false"] [data-nextjs-toast],
+html[data-debug-overlay="false"] [data-next-badge-root] {
+  display: none !important;
+}
