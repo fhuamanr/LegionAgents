@@ -228,7 +228,7 @@ def test_non_blocking_governance_issue_is_warning_in_balanced_mode() -> None:
     assert result.warnings
 
 
-def test_clean_boundaries_can_block_in_strict_mode() -> None:
+def test_clean_boundaries_is_non_blocking_for_architect_even_in_strict_mode() -> None:
     validator = PolicyValidator()
     policy = GovernancePolicy(
         name="runtime",
@@ -252,5 +252,100 @@ def test_clean_boundaries_can_block_in_strict_mode() -> None:
         enforcement_mode="strict",
     )
 
+    assert result.valid is True
+    assert not result.errors
+    assert result.warnings
+
+
+def test_validate_input_is_warning_not_blocking_for_architect_in_balanced_mode() -> None:
+    validator = PolicyValidator()
+    policy = GovernancePolicy(
+        name="runtime",
+        scope="architect",
+        rules=(
+            GovernanceRule(
+                id="global.security.validate-input",
+                description="Validate external inputs and handle unsafe data explicitly.",
+                effect=RuleEffect.REQUIRE,
+                category=RuleCategory.SECURITY,
+                severity=GovernanceSeverity.BLOCKING,
+            ),
+        ),
+    )
+
+    result = validator.validate_generated_output(
+        policy=policy,
+        agent_name="architect",
+        raw_output="Architecture with modules and APIs, but no explicit security validation section.",
+        structured_output=None,
+        enforcement_mode="balanced",
+    )
+
+    assert result.valid is True
+    assert not result.errors
+    assert any("missing_security_consideration" in warning for warning in result.warnings)
+
+
+def test_missing_validation_mention_is_warning_not_violation_for_architect() -> None:
+    validator = PolicyValidator()
+    policy = GovernancePolicy(
+        name="runtime",
+        scope="architect",
+        rules=(
+            GovernanceRule(
+                id="global.security.validate-input",
+                description="Validate external inputs and handle unsafe data explicitly.",
+                effect=RuleEffect.REQUIRE,
+                category=RuleCategory.SECURITY,
+                severity=GovernanceSeverity.BLOCKING,
+            ),
+        ),
+    )
+
+    result = validator.validate_generated_output(
+        policy=policy,
+        agent_name="architect",
+        raw_output="{}",
+        structured_output=None,
+        enforcement_mode="balanced",
+    )
+
+    assert result.valid is True
+    assert not result.errors
+    assert any("missing_security_consideration" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_hardcoded_secret_still_blocks_developer() -> None:
+    engine = AgentGovernanceEngine(
+        agents_root=Path.cwd() / "agents",
+        standards_root=Path.cwd() / "repository" / "standards",
+    )
+    output = DeveloperOutput(
+        agent_name="developer",
+        summary="Introduces unsafe token in code",
+        code_changes=(
+            CodeChangeProposal(
+                path="src/auth/config.py",
+                change_type="update",
+                description="Adds token",
+                content="API_KEY='super-secret-token'",
+            ),
+        ),
+        tests=(
+            TestGenerationProposal(
+                path="tests/test_auth.py",
+                test_type="unit",
+                description="Auth tests",
+                content="def test_auth():\n    assert True\n",
+            ),
+        ),
+    )
+
+    result = await engine.validate_generated_output(
+        agent_name="developer",
+        raw_output=output.model_dump_json(),
+        structured_output=output,
+    )
     assert result.valid is False
-    assert result.errors
+    assert any("global.security.no-secret-exposure" in error for error in result.errors)

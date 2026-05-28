@@ -66,6 +66,8 @@ class BaseAgent(ABC, Generic[TOutput]):
                 error_type = "json_parse_error"
             elif "schema_contract_error:" in error_text:
                 error_type = "schema_contract_error"
+            elif "governance_validation_error" in error_text or "governance runtime rejection" in error_text.lower() or "governance validation failed" in error_text.lower():
+                error_type = "governance_validation_error"
             elif "Output is not valid JSON" in error_text:
                 error_type = "json_parse_error"
             else:

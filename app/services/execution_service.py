@@ -1287,6 +1287,20 @@ class ExecutionService:
             handoff = str(metadata.get("handoff_summary") or structured.get("summary") or summary).strip()
             if handoff:
                 (agent_root / "handoff.md").write_text(handoff, encoding="utf-8")
+        governance_validation = metadata.get("governance_validation", {}) if isinstance(metadata, dict) else {}
+        if isinstance(governance_validation, dict) and governance_validation:
+            report = governance_validation.get("report", {})
+            warnings = governance_validation.get("warnings", ())
+            if isinstance(report, dict) and report:
+                (agent_root / "governance_report.json").write_text(
+                    json.dumps(report, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            if isinstance(warnings, (list, tuple)) and warnings:
+                (agent_root / "governance_warnings.md").write_text(
+                    "# Governance Warnings\n\n" + "\n".join(f"- {str(item)}" for item in warnings),
+                    encoding="utf-8",
+                )
         if event_name == "agent_failed":
             errors = list(getattr(snapshot, "errors", tuple()) or [])
             if errors:
@@ -1342,6 +1356,25 @@ class ExecutionService:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(str(content), encoding="utf-8")
             self._finalize_ba_artifacts(agent_root)
+        if agent_name == "architect":
+            intelligence = metadata.get("architect_intelligence", {}) if isinstance(metadata, dict) else {}
+            documents = intelligence.get("docs", {}) if isinstance(intelligence, dict) else {}
+            diagrams = intelligence.get("diagrams", {}) if isinstance(intelligence, dict) else {}
+            if isinstance(documents, dict):
+                for name, content in documents.items():
+                    if not isinstance(name, str):
+                        continue
+                    target = agent_root / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(str(content), encoding="utf-8")
+            if isinstance(diagrams, dict):
+                for name, content in diagrams.items():
+                    if not isinstance(name, str):
+                        continue
+                    target = agent_root / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(str(content), encoding="utf-8")
+            self._finalize_architect_artifacts(agent_root)
         if agent_name == "docs":
             markdown = ""
             if isinstance(structured, dict):
@@ -1471,6 +1504,185 @@ class ExecutionService:
             self._build_ba_quality_alignment_report(index=index, repaired_sections=repaired),
             encoding="utf-8",
         )
+
+    def _finalize_architect_artifacts(self, agent_root: Path) -> None:
+        required_docs = {
+            "architecture.md": "# Architecture\n\nSystem overview pending finalization.\n",
+            "module_decomposition.md": "# Module Decomposition\n\n## Identity\n- Responsibility: auth/session\n",
+            "bounded_contexts.md": "# Bounded Contexts\n\n## Identity\n- Aggregate roots: User, Session\n",
+            "api_contracts.md": "# API Contracts\n\n- GET /api/products\n- POST /api/checkout\n",
+            "openapi_draft.yaml": (
+                "openapi: 3.0.3\ninfo:\n  title: Solution API\n  version: 0.1.0\npaths:\n"
+                "  /api/checkout:\n    post:\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema:\n              $ref: '#/components/schemas/CheckoutRequest'\n"
+                "      responses:\n        '201':\n          description: Order created\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/OrderResponse'\n"
+                "        '422':\n          description: Validation error\ncomponents:\n  schemas:\n    CheckoutRequest:\n      type: object\n      properties:\n        address_id:\n          type: string\n    OrderResponse:\n      type: object\n      properties:\n        order_id:\n          type: string\n"
+            ),
+            "database_design.md": (
+                "# Database Design\n\n## Tables\n- users(id, email, password_hash, role, status, created_at, updated_at, deleted_at)\n"
+                "- products(id, sku, title, description, price, currency, status, created_at, updated_at)\n"
+                "- carts(id, user_id, status, created_at, updated_at)\n- cart_items(id, cart_id, product_id, quantity, unit_price)\n"
+                "- orders(id, user_id, status, amount_total, currency, created_at, updated_at)\n- order_items(id, order_id, product_id, quantity, unit_price)\n- payments(id, order_id, status, amount, created_at, updated_at)\n\n"
+                "## Constraints\n- unique(users.email)\n- unique(products.sku)\n- cart_items unique(cart_id, product_id)\n- quantity > 0, price >= 0\n\n"
+                "## Lifecycle\n- cart: ACTIVE -> CHECKED_OUT/EXPIRED\n- order: PENDING -> PAID/FAILED -> SHIPPED -> DELIVERED/CANCELLED\n"
+            ),
+            "frontend_architecture.md": "# Frontend Architecture\n\nRoute hierarchy and shared layouts.\n",
+            "backend_architecture.md": (
+                "# Backend Architecture\n\n## Layers\n- api (routers, middleware, schemas)\n- application (use cases, services, dto)\n- domain (entities, policies, repository interfaces)\n- infrastructure (db repos, external adapters)\n\n"
+                "## Cross-cutting\n- validation strategy at DTO + domain levels\n- centralized error handling and response mapping\n- auth middleware and RBAC checks\n- structured logging and configuration boundaries\n"
+            ),
+            "event_flow_architecture.md": "# Event Flow Architecture\n\nDomain events and retry/idempotency.\n",
+            "security_architecture.md": "# Security Architecture\n\nAuthN/AuthZ, validation, secrets handling.\n",
+            "observability_plan.md": (
+                "# Observability Plan\n\n## Logs\n- technical logs\n- audit logs\n- correlation IDs and trace IDs\n\n"
+                "## Metrics\n- latency, error rate, throughput\n- checkout conversion, payment failure KPI\n\n"
+                "## Traces and Health\n- distributed traces for checkout/auth\n- liveness/readiness endpoints\n- alert examples for p95 latency and 5xx spikes\n"
+            ),
+            "deployment_architecture.md": (
+                "# Deployment Architecture\n\n## Services\n- frontend\n- backend\n- postgres\n- redis(optional)\n\n"
+                "## Runtime\n- env vars for db/auth/provider keys\n- docker networking and persistent volumes\n- secrets via runtime injection\n- migration strategy before app rollout\n"
+            ),
+            "technical_risks.md": "# Technical Risks\n\n| Risk | Impact | Likelihood | Mitigation |\n|---|---|---|---|\n",
+            "developer_handoff.md": (
+                "# Developer Handoff\n\n## Modules\n- Identity, Catalog, Cart, Checkout, Orders, Admin\n\n"
+                "## File Structure\n- backend/src/api, application, domain, infrastructure\n- frontend/src/routes, components, lib/api\n\n"
+                "## Implement\n- endpoints: auth/products/cart/checkout/orders/profile\n- DTOs and entities for all order/cart flows\n- frontend routes and components for catalog/cart/checkout\n- validation rules and required tests (unit+integration)\n"
+            ),
+            "architect_quality_report.md": "# Architect Quality Report\n\n- Completeness score: 0/100\n",
+        }
+        required_diagrams = {
+            "diagrams/system_context.mmd": "flowchart LR\nUser-->Frontend\nFrontend-->Backend\nBackend-->Database\n",
+            "diagrams/container_diagram.mmd": "flowchart TD\nBrowser-->WebApp\nWebApp-->API\nAPI-->Postgres\n",
+            "diagrams/module_dependencies.mmd": "flowchart LR\nIdentity-->Checkout\nCatalog-->Cart\nCart-->Orders\n",
+            "diagrams/entity_relationships.mmd": "erDiagram\nUSERS ||--o{ ORDERS : places\n",
+            "diagrams/checkout_sequence.mmd": "sequenceDiagram\nparticipant U as User\nU->>API: POST /checkout\n",
+            "diagrams/auth_sequence.mmd": "sequenceDiagram\nUser->>API: POST /auth/login\n",
+            "diagrams/deployment_diagram.mmd": "flowchart LR\nIngress-->Frontend\nIngress-->Backend\nBackend-->DB\n",
+        }
+        required_adrs = {
+            "adr/0001-architecture-style.md": "# ADR 0001 - Architecture Style\n\nContext\nDecision\nConsequences\nAlternatives\n",
+            "adr/0002-auth-session-strategy.md": "# ADR 0002 - Auth/Session Strategy\n\nContext\nDecision\nConsequences\nAlternatives\n",
+            "adr/0003-database-design.md": "# ADR 0003 - Database Design\n\nContext\nDecision\nConsequences\nAlternatives\n",
+            "adr/0004-frontend-routing.md": "# ADR 0004 - Frontend Routing\n\nContext\nDecision\nConsequences\nAlternatives\n",
+            "adr/0005-error-handling.md": "# ADR 0005 - Error Handling\n\nContext\nDecision\nConsequences\nAlternatives\n",
+        }
+
+        repaired: list[str] = []
+        for relative, template in {**required_docs, **required_diagrams, **required_adrs}.items():
+            target = agent_root / relative
+            existing = target.read_text(encoding="utf-8", errors="ignore") if target.exists() else ""
+            if (not target.exists()) or self._is_sparse_markdown(existing):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(template, encoding="utf-8")
+                repaired.append(relative)
+
+        index = self._build_architect_artifact_index(agent_root)
+        (agent_root / "architect_artifact_index.json").write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
+        (agent_root / "architect_quality_report.md").write_text(
+            self._build_architect_quality_report(index=index, repaired_sections=repaired),
+            encoding="utf-8",
+        )
+
+    def _build_architect_artifact_index(self, agent_root: Path) -> dict[str, Any]:
+        def exists(rel: str) -> bool:
+            return (agent_root / rel).exists()
+        def read(rel: str) -> str:
+            return (agent_root / rel).read_text(encoding="utf-8", errors="ignore") if exists(rel) else ""
+        def depth_score(text: str, *, required_tokens: tuple[str, ...], min_chars: int) -> int:
+            value = (text or "").strip()
+            if not value:
+                return 0
+            score = 35 if len(value) >= min_chars else int(35 * (len(value) / max(1, min_chars)))
+            lowered = value.lower()
+            token_hits = sum(1 for token in required_tokens if token in lowered)
+            score += min(45, token_hits * max(1, int(45 / max(1, len(required_tokens)))))
+            if any(placeholder in lowered for placeholder in ("todo", "placeholder", "tbd", "pending finalization")):
+                score -= 25
+            if len(value.splitlines()) < 8:
+                score -= 10
+            return max(0, min(100, score))
+
+        api_text = read("api_contracts.md")
+        db_text = read("database_design.md")
+        backend_text = read("backend_architecture.md")
+        observability_text = read("observability_plan.md")
+        deployment_text = read("deployment_architecture.md")
+        handoff_text = read("developer_handoff.md")
+        openapi_text = read("openapi_draft.yaml")
+        return {
+            "artifacts_present": {
+                "architecture": exists("architecture.md"),
+                "module_decomposition": exists("module_decomposition.md"),
+                "bounded_contexts": exists("bounded_contexts.md"),
+                "api_contracts": exists("api_contracts.md"),
+                "openapi": exists("openapi_draft.yaml"),
+                "database_design": exists("database_design.md"),
+                "frontend_architecture": exists("frontend_architecture.md"),
+                "backend_architecture": exists("backend_architecture.md"),
+                "event_flow_architecture": exists("event_flow_architecture.md"),
+                "security_architecture": exists("security_architecture.md"),
+                "observability_plan": exists("observability_plan.md"),
+                "deployment_architecture": exists("deployment_architecture.md"),
+                "technical_risks": exists("technical_risks.md"),
+                "developer_handoff": exists("developer_handoff.md"),
+                "quality_report": exists("architect_quality_report.md"),
+            },
+            "diagram_files": sorted(str(path.relative_to(agent_root)).replace("\\", "/") for path in (agent_root / "diagrams").glob("*.mmd")) if (agent_root / "diagrams").exists() else [],
+            "adr_files": sorted(str(path.relative_to(agent_root)).replace("\\", "/") for path in (agent_root / "adr").glob("*.md")) if (agent_root / "adr").exists() else [],
+            "api_endpoint_count": sum(1 for line in api_text.splitlines() if line.strip().startswith("- ") and "/" in line),
+            "db_entity_mentions": sum(1 for entity in ("users", "products", "inventory", "carts", "orders", "payments") if entity in db_text.lower()),
+            "depth_scores": {
+                "openapi": depth_score(openapi_text, required_tokens=("components:", "schemas:", "requestbody", "responses:", "security"), min_chars=1200),
+                "database_design": depth_score(db_text, required_tokens=("primary key", "foreign key", "index", "constraint", "audit", "soft delete"), min_chars=900),
+                "backend_architecture": depth_score(backend_text, required_tokens=("api", "application", "domain", "infrastructure", "middleware", "validation", "logging"), min_chars=1000),
+                "observability_plan": depth_score(observability_text, required_tokens=("logs", "audit", "metrics", "traces", "health", "alert", "correlation"), min_chars=700),
+                "deployment_architecture": depth_score(deployment_text, required_tokens=("docker", "environment", "network", "volume", "secrets", "migration"), min_chars=700),
+                "developer_handoff": depth_score(handoff_text, required_tokens=("modules", "file structure", "endpoints", "dto", "entities", "routes", "tests"), min_chars=900),
+            },
+        }
+
+    def _build_architect_quality_report(self, *, index: dict[str, Any], repaired_sections: list[str]) -> str:
+        checks = index.get("artifacts_present", {})
+        depth_scores = index.get("depth_scores", {}) if isinstance(index.get("depth_scores", {}), dict) else {}
+        check_score = int((sum(1 for v in checks.values() if v) / max(1, len(checks))) * 100) if isinstance(checks, dict) else 0
+        api_score = min(100, int(index.get("api_endpoint_count", 0)) * 6 + int(depth_scores.get("openapi", 0) * 0.4))
+        db_score = min(100, int(index.get("db_entity_mentions", 0)) * 8 + int(depth_scores.get("database_design", 0) * 0.5))
+        diagram_score = min(100, len(index.get("diagram_files", [])) * 14)
+        adr_score = min(100, len(index.get("adr_files", [])) * 20)
+        backend_score = int(depth_scores.get("backend_architecture", 0))
+        observability_score = int(depth_scores.get("observability_plan", 0))
+        deployment_score = int(depth_scores.get("deployment_architecture", 0))
+        handoff_score = int(depth_scores.get("developer_handoff", 0))
+        warnings: list[str] = []
+        for key, value in depth_scores.items():
+            if int(value) < 65:
+                warnings.append(f"{key} depth is low ({value}/100).")
+        lines = [
+            "# Architect Quality Report",
+            "",
+            f"- Module completeness: {int((check_score * 0.4) + (backend_score * 0.6))}/100",
+            f"- API completeness: {api_score}/100",
+            f"- DB completeness: {db_score}/100",
+            f"- Frontend architecture completeness: {80 if checks.get('frontend_architecture') else 30}/100",
+            f"- Backend architecture completeness: {backend_score}/100",
+            f"- Security completeness: {80 if checks.get('security_architecture') else 40}/100",
+            f"- Observability completeness: {observability_score}/100",
+            f"- Deployment readiness: {deployment_score}/100",
+            f"- Developer handoff readiness: {handoff_score}/100",
+            "",
+            "## Repaired Sections",
+        ]
+        lines.extend(f"- {name}" for name in (repaired_sections or ["none"]))
+        lines.extend(
+            [
+                "",
+                f"- Diagram coverage score: {diagram_score}/100",
+                f"- ADR coverage score: {adr_score}/100",
+                "",
+                "## Depth Warnings",
+            ]
+        )
+        lines.extend(f"- {warning}" for warning in (warnings or ["none"]))
+        return "\n".join(lines) + "\n"
 
     def _is_sparse_markdown(self, text: str) -> bool:
         cleaned = (text or "").strip()

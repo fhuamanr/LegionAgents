@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from core.agents.model_clients import OpenAIChatModelClient
 from core.agents.ba_intelligence import build_ba_intelligence_bundle
+from core.agents.architect_intelligence import build_architect_bundle
 from core.agents.runtime import AgentModelClient
 from core.contracts.agents import AgentStatus
 from core.contracts.artifacts import Artifact, ArtifactKind
@@ -169,6 +170,90 @@ class BusinessAnalystAgentRuntime(LLMStructuredAgentRuntime):
         updated = dict(result.metadata)
         updated["ba_intelligence"] = bundle
         return result.model_copy(update={"metadata": updated})
+
+
+class SolutionArchitectAgentRuntime(LLMStructuredAgentRuntime):
+    """Architect runtime that converts finalized BA artifacts into technical blueprints."""
+
+    async def build_artifacts(
+        self,
+        request: AgentExecutionRequest,
+        output: BaseModel,
+    ) -> tuple[Artifact, ...]:
+        base = await super().build_artifacts(request, output)
+        if not isinstance(output, ArchitectOutput):
+            return base
+        bundle = build_architect_bundle(
+            task=request.task,
+            ba_index=self._extract_ba_index(request),
+            ba_docs=self._extract_ba_docs(request),
+            structured_output=output.model_dump(mode="json"),
+        )
+        artifacts: list[Artifact] = list(base)
+        for name, content in bundle.get("docs", {}).items():
+            artifacts.append(
+                Artifact(
+                    id=f"architect-doc-{request.execution_id}-{name}",
+                    kind=ArtifactKind.ARCHITECTURE,
+                    name=name,
+                    producer_agent=self.config.name,
+                    content=str(content),
+                )
+            )
+        for name, content in bundle.get("diagrams", {}).items():
+            artifacts.append(
+                Artifact(
+                    id=f"architect-diagram-{request.execution_id}-{name}",
+                    kind=ArtifactKind.DIAGRAM,
+                    name=name,
+                    producer_agent=self.config.name,
+                    content=str(content),
+                )
+            )
+        return tuple(artifacts)
+
+    async def _execute_once(self, request: AgentExecutionRequest) -> AgentExecutionResult:
+        result = await super()._execute_once(request)
+        if result.status != AgentStatus.COMPLETED:
+            return result
+        structured = result.metadata.get("structured_output", {}) if isinstance(result.metadata, dict) else {}
+        if not isinstance(structured, dict):
+            return result
+        bundle = build_architect_bundle(
+            task=request.task,
+            ba_index=self._extract_ba_index(request),
+            ba_docs=self._extract_ba_docs(request),
+            structured_output=structured,
+        )
+        updated = dict(result.metadata)
+        updated["architect_intelligence"] = bundle
+        return result.model_copy(update={"metadata": updated})
+
+    def _extract_ba_docs(self, request: AgentExecutionRequest) -> dict[str, str]:
+        docs: dict[str, str] = {}
+        for artifact in request.upstream_artifacts:
+            producer = str(artifact.producer_agent or "").lower()
+            if producer != "ba":
+                continue
+            name = str(artifact.name or "").strip()
+            if name:
+                docs[name] = str(artifact.content or "")
+        return docs
+
+    def _extract_ba_index(self, request: AgentExecutionRequest) -> dict[str, Any]:
+        for artifact in request.upstream_artifacts:
+            producer = str(artifact.producer_agent or "").lower()
+            if producer != "ba":
+                continue
+            name = str(artifact.name or "").strip().lower()
+            if not name.endswith("ba_artifact_index.json"):
+                continue
+            try:
+                payload = json.loads(str(artifact.content or "{}"))
+            except json.JSONDecodeError:
+                return {}
+            return payload if isinstance(payload, dict) else {}
+        return {}
 
 
 class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
@@ -509,7 +594,7 @@ def build_llm_agent_runtimes(
     )
 
     runtimes: dict[str, LLMStructuredAgentRuntime] = {
-        name: (BusinessAnalystAgentRuntime if name == "ba" else LLMStructuredAgentRuntime)(
+        name: (BusinessAnalystAgentRuntime if name == "ba" else SolutionArchitectAgentRuntime if name == "architect" else LLMStructuredAgentRuntime)(
             config=RuntimeAgentConfig(
                 name=name,
                 role=role,

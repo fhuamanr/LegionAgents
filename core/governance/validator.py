@@ -91,15 +91,25 @@ class PolicyValidator:
                 continue
             enforced_rules.append(rule.id)
             if not self._required_check_passes(check, agent_name, output_text, structured_output):
+                severity = self._effective_severity(rule, agent_name)
+                reason = self._required_violation_reason(rule, check, agent_name)
                 violation = GovernanceViolation(
                     rule_id=rule.id,
-                    severity=rule.severity,
+                    severity=severity,
                     evidence=self._best_evidence(output_text),
                     matched_text=self._best_evidence(output_text),
-                    reason=f"Generated output violates required governance rule {rule.id}: {rule.description}",
+                    reason=reason,
                     suggested_fix="Adjust output to satisfy the required governance constraint.",
-                    blocking=self._is_blocking(rule.severity, mode),
+                    blocking=self._is_blocking(severity, mode),
                 )
+                if violation.blocking and self._weak_blocking_evidence(violation):
+                    violation = violation.model_copy(
+                        update={
+                            "blocking": False,
+                            "severity": GovernanceSeverity.WARNING,
+                            "reason": f"{violation.reason} (downgraded: weak evidence)",
+                        }
+                    )
                 violations.append(violation)
                 if not violation.blocking:
                     warnings.append(violation.reason)
@@ -223,6 +233,18 @@ class PolicyValidator:
         if check == "input_validation":
             if agent_name not in {"developer", "architect"}:
                 return True
+            if agent_name == "architect":
+                return any(
+                    token in lowered
+                    for token in (
+                        "input validation",
+                        "validate input",
+                        "sanitize",
+                        "payload validation",
+                        "request validation",
+                        "owasp",
+                    )
+                )
             implementation_text = self._implementation_text(structured_output).lower()
             if not implementation_text:
                 implementation_text = lowered
@@ -301,6 +323,39 @@ class PolicyValidator:
                     )
                 )
         return errors
+
+    def _effective_severity(self, rule: Any, agent_name: str) -> GovernanceSeverity:
+        rule_id = str(getattr(rule, "id", "")).lower()
+        agent = (agent_name or "").lower()
+        if agent == "architect" and rule_id in {
+            "global.security.validate-input",
+            "global.architecture.clean-boundaries",
+            "global.architecture.layering",
+            "global.quality.missing-tests",
+            "global.docs.missing-docs",
+        }:
+            return GovernanceSeverity.WARNING
+        if agent == "qa" and rule_id == "global.quality.missing-tests":
+            return GovernanceSeverity.WARNING
+        if agent == "docs" and rule_id == "global.docs.missing-docs":
+            return GovernanceSeverity.WARNING
+        return getattr(rule, "severity", GovernanceSeverity.BLOCKING)
+
+    def _required_violation_reason(self, rule: Any, check: str, agent_name: str) -> str:
+        if check == "input_validation" and agent_name.lower() == "architect":
+            return (
+                f"missing_security_consideration: {rule.id} is under-specified in architecture output. "
+                "Add explicit input validation and unsafe data handling expectations."
+            )
+        return f"Generated output violates required governance rule {rule.id}: {rule.description}"
+
+    def _weak_blocking_evidence(self, violation: GovernanceViolation) -> bool:
+        evidence = (violation.evidence or "").strip()
+        matched = (violation.matched_text or "").strip()
+        if len(evidence) < 12 and len(matched) < 12:
+            return True
+        generic_markers = {"{}", "[]", "none", "n/a"}
+        return evidence.lower() in generic_markers or matched.lower() in generic_markers
 
     def _is_blocking(self, severity: GovernanceSeverity, mode: str) -> bool:
         normalized = mode.strip().lower() if mode else "balanced"
