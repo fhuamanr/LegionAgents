@@ -632,17 +632,20 @@ def _normalize_qa_payload(payload: dict[str, Any], *, raw_output: str) -> tuple[
         summary_seed = str(normalized.get("status") or normalized.get("result") or "").strip()
         normalized["summary"] = summary_seed or "Short QA evaluation summary."
         added.append("summary")
-    if not isinstance(normalized.get("findings"), list):
-        normalized["findings"] = []
+    findings = normalized.get("findings")
+    if not isinstance(findings, list):
+        findings = []
         added.append("findings")
-    if not isinstance(normalized.get("test_reports"), list):
-        normalized["test_reports"] = []
+    test_reports = normalized.get("test_reports")
+    if not isinstance(test_reports, list):
+        test_reports = []
         added.append("test_reports")
     if not isinstance(normalized.get("execution_logs"), list):
         normalized["execution_logs"] = []
         added.append("execution_logs")
-    if not isinstance(normalized.get("bug_summaries"), list):
-        normalized["bug_summaries"] = []
+    bug_summaries = normalized.get("bug_summaries")
+    if not isinstance(bug_summaries, list):
+        bug_summaries = []
         added.append("bug_summaries")
     if "passed" not in normalized:
         status = str(normalized.get("status", "")).strip().lower()
@@ -650,8 +653,276 @@ def _normalize_qa_payload(payload: dict[str, Any], *, raw_output: str) -> tuple[
         added.append("passed")
     if not isinstance(normalized.get("metadata"), dict):
         normalized["metadata"] = {}
-    normalized["metadata"].setdefault("raw_output_size", len(raw_output))
+    metadata: dict[str, Any] = normalized["metadata"]
+    metadata.setdefault("raw_output_size", len(raw_output))
+
+    alias_test_results = normalized.pop("test_results", None)
+    alias_issues_found = normalized.pop("issues_found", None)
+    alias_recommendations = normalized.pop("recommendations", None)
+    alias_failed_validations = normalized.pop("failed_validations", None)
+
+    parsed_test_reports = _map_qa_test_results(alias_test_results)
+    if parsed_test_reports:
+        test_reports.extend(parsed_test_reports)
+        added.append("test_results->test_reports")
+
+    parsed_findings = _map_qa_issues(alias_issues_found)
+    if parsed_findings:
+        findings.extend(parsed_findings)
+        added.append("issues_found->findings")
+
+    recommendation_list = _normalize_string_list(alias_recommendations)
+    if recommendation_list:
+        metadata["recommended_fixes"] = recommendation_list[:8]
+        added.append("recommendations->metadata.recommended_fixes")
+        for index, recommendation in enumerate(recommendation_list):
+            if index < len(findings) and isinstance(findings[index], dict) and not findings[index].get("recommendation"):
+                findings[index]["recommendation"] = recommendation
+
+    fix_requests = _map_qa_fix_requests(
+        failed_validations=alias_failed_validations,
+        findings=findings,
+        recommendations=recommendation_list,
+        raw_output=raw_output,
+    )
+    if fix_requests:
+        metadata["structured_fix_requests"] = fix_requests
+        added.append("structured_fix_requests")
+
+    if parsed_findings and not bug_summaries:
+        bug_summaries = _findings_to_bug_summaries(parsed_findings)
+        added.append("findings->bug_summaries")
+
+    semantic_signals = bool(parsed_test_reports or parsed_findings or recommendation_list or fix_requests)
+    raw_has_semantics = any(token in raw_output.lower() for token in ("issues_found", "test_results", "recommendations", "failed validations", "failed_validations"))
+    if (semantic_signals or raw_has_semantics) and not findings and not test_reports and not bug_summaries:
+        metadata["qa_extraction_failed"] = True
+        findings = [
+            {
+                "id": "qa-finding-1",
+                "title": "QA extraction fallback",
+                "severity": "medium",
+                "evidence": raw_output[:600] or "Semantic QA content detected but structured mapping returned empty.",
+                "recommendation": "Review raw_output.md and refine extraction mapping.",
+            }
+        ]
+        added.append("qa_extraction_failed_fallback")
+
+    normalized["findings"] = findings
+    normalized["test_reports"] = test_reports
+    normalized["bug_summaries"] = bug_summaries
+    metadata["qa_semantic_extraction_report"] = _build_qa_semantic_extraction_report(
+        raw_output=raw_output,
+        test_reports=test_reports,
+        findings=findings,
+        bug_summaries=bug_summaries,
+        fix_requests=metadata.get("structured_fix_requests", []),
+        discarded_aliases={
+            "test_results": 0 if alias_test_results is None else len(alias_test_results) if isinstance(alias_test_results, list) else 1,
+            "issues_found": 0 if alias_issues_found is None else len(alias_issues_found) if isinstance(alias_issues_found, list) else 1,
+            "recommendations": len(recommendation_list),
+            "failed_validations": 0 if alias_failed_validations is None else len(alias_failed_validations) if isinstance(alias_failed_validations, list) else 1,
+        },
+        extraction_failed=bool(metadata.get("qa_extraction_failed", False)),
+    )
     return normalized, added
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item).strip() if item is not None else ""
+        if text:
+            result.append(text)
+    return result
+
+
+def _map_qa_test_results(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    reports: list[dict[str, Any]] = []
+    for index, item in enumerate(value, start=1):
+        if isinstance(item, str):
+            description = item.strip()
+            status = "failed" if "fail" in description.lower() else "passed"
+            evidence = description
+        elif isinstance(item, dict):
+            description = str(item.get("description") or item.get("name") or f"QA test {index}").strip()
+            status = str(item.get("status") or "").strip().lower()
+            evidence = str(item.get("evidence") or description).strip()
+        else:
+            continue
+        passed = 1 if status in {"pass", "passed", "ok", "success"} else 0
+        failed = 1 if status in {"fail", "failed", "error"} else 0
+        if passed == 0 and failed == 0:
+            failed = 1 if "fail" in evidence.lower() else 0
+            passed = 0 if failed else 1
+        reports.append(
+            {
+                "name": description[:120] or f"QA test {index}",
+                "test_type": "functional",
+                "passed": passed,
+                "failed": failed,
+                "skipped": 0,
+                "details": evidence[:800],
+            }
+        )
+    return reports[:20]
+
+
+def _map_qa_issues(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    findings: list[dict[str, Any]] = []
+    for index, item in enumerate(value, start=1):
+        if isinstance(item, str):
+            title = item.strip()
+            severity = "medium"
+            evidence = title
+            recommendation = None
+        elif isinstance(item, dict):
+            title = str(item.get("title") or item.get("description") or item.get("issue") or f"QA issue {index}").strip()
+            severity = str(item.get("severity") or "medium").strip().lower()
+            evidence = str(item.get("evidence") or title).strip()
+            recommendation = str(item.get("recommendation") or "").strip() or None
+        else:
+            continue
+        if severity not in {"info", "low", "medium", "high", "critical"}:
+            severity = "medium"
+        findings.append(
+            {
+                "id": f"qa-finding-{index}",
+                "title": title[:140] or f"QA issue {index}",
+                "severity": severity,
+                "evidence": evidence[:1000] or title[:1000],
+                "recommendation": recommendation,
+            }
+        )
+    return findings[:20]
+
+
+def _findings_to_bug_summaries(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    bugs: list[dict[str, Any]] = []
+    for index, finding in enumerate(findings, start=1):
+        bugs.append(
+            {
+                "id": f"qa-bug-{index}",
+                "title": str(finding.get("title") or f"QA bug {index}")[:140],
+                "severity": str(finding.get("severity") or "medium"),
+                "reproduction_steps": ("See QA finding evidence.",),
+                "expected": "Expected behavior should pass QA validation.",
+                "actual": str(finding.get("evidence") or "")[:400],
+            }
+        )
+    return bugs[:20]
+
+
+def _map_qa_fix_requests(
+    *,
+    failed_validations: Any,
+    findings: list[dict[str, Any]],
+    recommendations: list[str],
+    raw_output: str,
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    validation_items = failed_validations if isinstance(failed_validations, list) else []
+    source_items = validation_items or findings
+    for index, item in enumerate(source_items, start=1):
+        if isinstance(item, dict):
+            title = str(item.get("title") or item.get("description") or item.get("issue") or f"QA fix {index}").strip()
+            severity = str(item.get("severity") or "medium").strip().lower()
+            evidence = str(item.get("evidence") or title).strip()
+            impacted_files = _extract_paths_from_text(evidence + "\n" + raw_output)
+            impacted_modules = _extract_modules_from_paths(impacted_files)
+            requests.append(
+                {
+                    "id": f"qa-fix-{index}",
+                    "title": title[:160],
+                    "severity": severity if severity in {"low", "medium", "high", "critical"} else "medium",
+                    "priority": "high" if severity in {"high", "critical"} else "medium",
+                    "failing_flows": [title[:160]],
+                    "impacted_files": impacted_files[:12],
+                    "impacted_modules": impacted_modules[:8],
+                    "missing_validations": [title[:160]],
+                    "frontend_issues": [title[:160]] if any(token in title.lower() for token in ("ui", "form", "checkout", "screen")) else [],
+                    "backend_issues": [title[:160]] if any(token in title.lower() for token in ("api", "service", "validation", "route")) else [],
+                    "recommended_fixes": recommendations[:3] if recommendations else ["Implement targeted fix and add regression tests."],
+                }
+            )
+    return requests[:20]
+
+
+def _extract_paths_from_text(text: str) -> list[str]:
+    candidates: list[str] = []
+    for token in re.split(r"\s+", text):
+        value = token.strip("`'\".,:;()[]{}")
+        if "/" not in value:
+            continue
+        if any(value.endswith(ext) for ext in (".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".md", ".yaml", ".yml")):
+            candidates.append(value)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in candidates:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
+
+
+def _extract_modules_from_paths(paths: list[str]) -> list[str]:
+    modules: list[str] = []
+    for path in paths:
+        parts = [part for part in path.split("/") if part]
+        if len(parts) >= 2:
+            modules.append(parts[-2])
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in modules:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
+
+
+def _build_qa_semantic_extraction_report(
+    *,
+    raw_output: str,
+    test_reports: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+    bug_summaries: list[dict[str, Any]],
+    fix_requests: Any,
+    discarded_aliases: dict[str, int],
+    extraction_failed: bool,
+) -> str:
+    fix_count = len(fix_requests) if isinstance(fix_requests, list) else 0
+    lines = [
+        "# QA Semantic Extraction Report",
+        "",
+        f"- Raw output size: {len(raw_output)}",
+        f"- Test reports mapped: {len(test_reports)}",
+        f"- Findings mapped: {len(findings)}",
+        f"- Bug summaries mapped: {len(bug_summaries)}",
+        f"- Structured fix requests generated: {fix_count}",
+        f"- Extraction failed fallback used: {extraction_failed}",
+        "",
+        "## Alias Inputs Detected",
+    ]
+    lines.extend(f"- {name}: {count}" for name, count in discarded_aliases.items())
+    lines.extend(
+        [
+            "",
+            "## Mapping Notes",
+            "- test_results -> test_reports",
+            "- issues_found -> findings / bug_summaries",
+            "- recommendations -> metadata.recommended_fixes",
+            "- failed_validations -> metadata.structured_fix_requests",
+        ]
+    )
+    return "\n".join(lines) + "\n"
 
 
 def _normalize_architect_payload(payload: dict[str, Any], *, raw_output: str) -> tuple[dict[str, Any], list[str]]:

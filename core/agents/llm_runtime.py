@@ -133,7 +133,10 @@ class QAAgentRuntime(LLMStructuredAgentRuntime):
         base = await super().build_artifacts(request, output)
         if not isinstance(output, QAOutput):
             return base
-        fix_requests = self._build_structured_fix_requests(output)
+        structured_meta = output.metadata if isinstance(output.metadata, dict) else {}
+        fix_requests = structured_meta.get("structured_fix_requests")
+        if not isinstance(fix_requests, list) or not fix_requests:
+            fix_requests = self._build_structured_fix_requests(output)
         return (
             *base,
             Artifact(
@@ -150,7 +153,10 @@ class QAAgentRuntime(LLMStructuredAgentRuntime):
         metadata = super().result_metadata(output)
         if not isinstance(output, QAOutput):
             return metadata
-        fix_requests = self._build_structured_fix_requests(output)
+        structured_meta = output.metadata if isinstance(output.metadata, dict) else {}
+        fix_requests = structured_meta.get("structured_fix_requests")
+        if not isinstance(fix_requests, list) or not fix_requests:
+            fix_requests = self._build_structured_fix_requests(output)
         metadata["structured_fix_requests"] = fix_requests
         if not output.passed:
             primary = fix_requests[0] if fix_requests else {}

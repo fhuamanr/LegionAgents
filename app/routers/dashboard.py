@@ -249,15 +249,42 @@ def _qa_report(workflow_id: Any, qa_events: list[Any]) -> dict[str, Any]:
     latest = qa_events[-1] if qa_events else None
     passed = bool(latest and latest.payload.get("metadata", {}).get("passed"))
     failed = any(event.type == ExecutionEventType.QA_FAILED for event in qa_events)
+    latest_output = next((event for event in reversed(qa_events) if event.type == ExecutionEventType.OUTPUT_GENERATED), None)
+    metadata = latest_output.payload.get("metadata", {}) if latest_output and isinstance(latest_output.payload, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    findings = metadata.get("findings", []) if isinstance(metadata.get("findings", []), list) else []
+    test_reports = metadata.get("test_reports", []) if isinstance(metadata.get("test_reports", []), list) else []
+    bug_summaries = metadata.get("bug_summaries", []) if isinstance(metadata.get("bug_summaries", []), list) else []
+    qa_meta = metadata.get("metadata", {}) if isinstance(metadata.get("metadata", {}), dict) else {}
+    fix_requests = qa_meta.get("structured_fix_requests", []) if isinstance(qa_meta.get("structured_fix_requests", []), list) else []
+    failed_tests = 0
+    for report in test_reports:
+        if not isinstance(report, dict):
+            continue
+        failed_tests += int(report.get("failed", 0) or 0)
+    impacted_modules: list[str] = []
+    for item in fix_requests:
+        if not isinstance(item, dict):
+            continue
+        modules = item.get("impacted_modules", [])
+        if isinstance(modules, list):
+            impacted_modules.extend(str(module) for module in modules if str(module).strip())
+    impacted_modules = list(dict.fromkeys(impacted_modules))[:12]
     return {
         "executionId": str(workflow_id),
         "status": "failed" if failed else "passed" if passed else "running",
         "coveragePercent": 0,
-        "unitTests": 0,
+        "unitTests": len(test_reports),
         "integrationTests": 0,
         "browserTests": 0,
-        "bugs": [],
+        "bugs": bug_summaries,
         "screenshots": [],
+        "findingsCount": len(findings),
+        "failedTests": failed_tests,
+        "recommendedFixesCount": len(qa_meta.get("recommended_fixes", [])) if isinstance(qa_meta.get("recommended_fixes", []), list) else 0,
+        "patchRequestsGenerated": len(fix_requests),
+        "impactedModules": impacted_modules,
     }
 
 

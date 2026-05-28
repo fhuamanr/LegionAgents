@@ -1290,6 +1290,14 @@ class ExecutionService:
             handoff = str(metadata.get("handoff_summary") or structured.get("summary") or summary).strip()
             if handoff:
                 (agent_root / "handoff.md").write_text(handoff, encoding="utf-8")
+            if agent_name == "qa":
+                qa_meta = structured.get("metadata", {}) if isinstance(structured.get("metadata", {}), dict) else {}
+                fix_requests = qa_meta.get("structured_fix_requests", [])
+                if isinstance(fix_requests, list) and fix_requests:
+                    (agent_root / "structured_fix_requests.json").write_text(
+                        json.dumps({"fix_requests": fix_requests}, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
         governance_validation = metadata.get("governance_validation", {}) if isinstance(metadata, dict) else {}
         if isinstance(governance_validation, dict) and governance_validation:
             report = governance_validation.get("report", {})
@@ -1327,6 +1335,17 @@ class ExecutionService:
                     json.dumps(repair_report, indent=2, ensure_ascii=False),
                     encoding="utf-8",
                 )
+            qa_extraction_report = ""
+            if isinstance(normalized_output, dict):
+                qa_meta = normalized_output.get("metadata", {}) if isinstance(normalized_output.get("metadata", {}), dict) else {}
+                qa_extraction_report = str(qa_meta.get("qa_semantic_extraction_report", "")).strip()
+                if qa_meta.get("qa_extraction_failed"):
+                    (agent_root / "qa_extraction_failure_analysis.md").write_text(
+                        qa_extraction_report or "# QA Extraction Failure Analysis\n\nSemantic QA content was detected but mapping needed fallback.\n",
+                        encoding="utf-8",
+                    )
+            if qa_extraction_report:
+                (agent_root / "qa_semantic_extraction_report.md").write_text(qa_extraction_report, encoding="utf-8")
         token_report = {
             "prompt_tokens": observability.get("prompt_token_estimate"),
             "output_tokens": observability.get("output_token_estimate"),
