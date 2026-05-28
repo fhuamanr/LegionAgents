@@ -13,8 +13,8 @@ export default function RootLayout({
   children: ReactNode;
 }>): JSX.Element {
   const debugOverlayEnabled =
-    process.env.FRONTEND_DEBUG_OVERLAY !== "false" &&
-    process.env.NEXT_PUBLIC_FRONTEND_DEBUG_OVERLAY !== "false";
+    process.env.FRONTEND_DEBUG_OVERLAY === "true" ||
+    process.env.NEXT_PUBLIC_FRONTEND_DEBUG_OVERLAY === "true";
 
   return (
     <html
