@@ -2,6 +2,70 @@
 
 All notable architecture increments for the Enterprise Multi-Agent Software Delivery Platform are tracked here.
 
+## v0.1.1-alpha - 2026-05-28
+
+Alpha stabilization and hardening release across runtime governance, artifact reliability, local execution viability, and agent implementation depth.
+
+### Added
+
+- Architect intelligence pipeline hardening with richer technical blueprint artifacts:
+  - `architecture.md`, `backend_architecture.md`, `frontend_architecture.md`
+  - `api_contracts.md`, `openapi_draft.yaml`
+  - `database_design.md`, `observability_plan.md`, `deployment_architecture.md`
+  - `developer_handoff.md`, ADRs, and architecture diagrams
+- Architect artifact finalization and depth-aware scoring:
+  - `architect_artifact_index.json`
+  - calibrated `architect_quality_report.md` with depth warnings
+- Developer incremental implementation engine:
+  - multi-pass behavior retained
+  - generated project package under `developer/generated_project/`
+  - matrices and handoffs:
+    - `api_implementation_matrix.md`
+    - `database_implementation_matrix.md`
+    - `frontend_route_matrix.md`
+    - `qa_handoff.md`
+    - `run_instructions.md`
+- Developer input preflight resolution:
+  - required Architect input validation before LLM call
+  - filesystem + index + alias resolution
+  - `developer_input_resolution_report.md` on preflight failure
+- Artifact diagnostics:
+  - execution-level forensic report support for failed runs
+  - persistent artifact-driven debugging workflow
+
+### Changed
+
+- Context governor handoff compaction now prioritizes latest artifacts (fixes stale upstream input issues between Architect and Developer).
+- Governance severity/behavior refined:
+  - broad architecture/security advisory rules downgraded from hard-fail defaults in balanced paths
+  - better separation of provider errors vs governance validation errors
+- Developer governance false-positive reduction for clean-boundary wording:
+  - advisory statements (e.g. "controllers should not contain business logic") no longer treated as violations
+  - code-context evidence required for controller-boundary blocking
+- Secret detection logic made context-aware:
+  - placeholder/example secrets in template/docs contexts treated as warning/non-blocking
+  - real secret-like values remain blocking
+
+### Fixed
+
+- Architect -> Developer linkage regression where required artifacts were present on disk but not resolved by Developer preflight.
+- Local workflow failures caused by deterministic retries on non-retryable governance/schema paths.
+- Inflated architect quality scores caused by file-existence-only scoring.
+
+### Quality and Test Coverage
+
+- Added/updated tests for:
+  - Architect artifact generation/finalization/depth scoring
+  - Developer incremental project generation and persistence
+  - latest-artifact handoff selection
+  - Developer required-architect-input resolution (root/nested/index/alias paths)
+  - governance false-positive handling and secret classification behavior
+
+### Known Alpha Limits
+
+- UI still needs deeper surfacing of governance repair/auto-remediation details.
+- End-to-end generated implementation depth will continue to improve in subsequent alpha iterations.
+
 ## v0.1.0-alpha - 2026-05-23
 
 First public alpha release focused on turning Legion Agents into a real MVP: configurable, demonstrable, observable, and usable end to end.

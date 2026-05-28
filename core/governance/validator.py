@@ -177,9 +177,9 @@ class PolicyValidator:
             patterns.extend(
                 [
                     r"\bapi[_-]?key\s*=",
-                    r"\bpassword\s*=",
-                    r"\bsecret\s*=",
-                    r"\btoken\s*=",
+                    r"\b[a-z0-9_]*password[a-z0-9_]*\s*=",
+                    r"\b[a-z0-9_]*secret[a-z0-9_]*\s*=",
+                    r"\b[a-z0-9_]*token[a-z0-9_]*\s*=",
                     r"-----begin (rsa |ec |open)?private key-----",
                 ]
             )
@@ -400,6 +400,17 @@ class PolicyValidator:
                 if "controller" in path or "controllers" in path:
                     controller_code += "\n" + content
         for violation in violations:
+            if violation.rule_id == "global.security.no-secret-exposure":
+                filtered_secret = self._classify_secret_violation(
+                    violation=violation,
+                    structured_output=structured_output,
+                    output_text=output_text,
+                    enforcement_mode=enforcement_mode,
+                )
+                if filtered_secret is None:
+                    continue
+                filtered.append(filtered_secret)
+                continue
             if "controller" not in violation.matched_text.lower():
                 filtered.append(violation)
                 continue
@@ -441,6 +452,130 @@ class PolicyValidator:
                 )
             )
         return filtered
+
+    def _classify_secret_violation(
+        self,
+        *,
+        violation: GovernanceViolation,
+        structured_output: Any | None,
+        output_text: str,
+        enforcement_mode: str,
+    ) -> GovernanceViolation | None:
+        candidates: list[tuple[str, str, str]] = []
+        if structured_output is not None:
+            for change in tuple(getattr(structured_output, "code_changes", tuple()) or tuple()):
+                path = str(getattr(change, "path", "")).strip()
+                content = str(getattr(change, "content", "") or "")
+                if path and content:
+                    candidates.append((path, content, "code"))
+            for test in tuple(getattr(structured_output, "tests", tuple()) or tuple()):
+                path = str(getattr(test, "path", "")).strip()
+                content = str(getattr(test, "content", "") or "")
+                if path and content:
+                    candidates.append((path, content, "test"))
+        if not candidates:
+            candidates.append(("", output_text, "docs"))
+
+        secret_line = self._extract_secret_assignment_line(candidates)
+        if secret_line is None:
+            return violation
+        path, line, content_type = secret_line
+        key, value = self._split_secret_assignment(line)
+        if self._is_password_field_usage(line):
+            return None
+        if self._is_placeholder_secret(value, path):
+            return violation.model_copy(
+                update={
+                    "blocking": False,
+                    "severity": GovernanceSeverity.WARNING,
+                    "reason": f"{violation.reason} (downgraded: placeholder/example secret in template/docs context)",
+                    "artifact_path": path,
+                    "content_type": content_type,
+                    "safe_phrase_detected": True,
+                }
+            )
+        if content_type in {"docs", "test"} and not self._looks_like_real_secret(value):
+            return violation.model_copy(
+                update={
+                    "blocking": False,
+                    "severity": GovernanceSeverity.WARNING,
+                    "reason": f"{violation.reason} (downgraded: non-runtime context)",
+                    "artifact_path": path,
+                    "content_type": content_type,
+                    "safe_phrase_detected": True,
+                }
+            )
+        return violation.model_copy(
+            update={
+                "blocking": self._is_blocking(violation.severity, enforcement_mode),
+                "artifact_path": path,
+                "content_type": content_type,
+                "evidence": f"{key}=<redacted>",
+                "matched_text": key,
+            }
+        )
+
+    def _extract_secret_assignment_line(self, candidates: list[tuple[str, str, str]]) -> tuple[str, str, str] | None:
+        pattern = re.compile(r"(?im)^\s*([A-Z0-9_]*(?:PASSWORD|SECRET|API_KEY|TOKEN)[A-Z0-9_]*)\s*=\s*(.+?)\s*$")
+        for path, content, ctype in candidates:
+            for line in content.splitlines():
+                if pattern.search(line):
+                    return path, line.strip(), ctype
+        return None
+
+    def _split_secret_assignment(self, line: str) -> tuple[str, str]:
+        if "=" not in line:
+            return line.strip(), ""
+        key, value = line.split("=", 1)
+        return key.strip(), value.strip().strip('"').strip("'")
+
+    def _is_password_field_usage(self, line: str) -> bool:
+        lowered = line.lower()
+        markers = ("field(", "basemodel", "input type='password'", "input type=\"password\"", "hash", "bcrypt", "argon2")
+        return any(marker in lowered for marker in markers) or ":" in line and "=" not in line
+
+    def _is_placeholder_secret(self, value: str, path: str) -> bool:
+        lowered = (value or "").strip().lower()
+        placeholder_tokens = (
+            "",
+            "example",
+            "changeme",
+            "change-me",
+            "your_password",
+            "your-password",
+            "placeholder",
+            "dummy",
+            "test",
+            "dev",
+            "local",
+            "postgres",
+            "admin",
+            "xxx",
+            "****",
+        )
+        if lowered in placeholder_tokens:
+            return True
+        if lowered.startswith("<") and lowered.endswith(">"):
+            return True
+        if lowered.startswith("${") and lowered.endswith("}"):
+            return True
+        path_lower = (path or "").lower()
+        if path_lower.endswith(".env.example") or "readme" in path_lower or "/docs/" in path_lower.replace("\\", "/"):
+            if lowered and not self._looks_like_real_secret(lowered):
+                return True
+        return False
+
+    def _looks_like_real_secret(self, value: str) -> bool:
+        lowered = (value or "").strip().lower()
+        if not lowered or len(lowered) < 8:
+            return False
+        if lowered.startswith("sk-live-") or lowered.startswith("sk-"):
+            return True
+        if any(ch.isdigit() for ch in lowered) and any(ch.isalpha() for ch in lowered) and any(ch in lowered for ch in ("@", "#", "$", "-", "_")):
+            return True
+        if lowered not in {"postgres", "admin", "password", "changeme", "change-me"} and len(lowered) >= 12:
+            return True
+        return False
 
     def _is_blocking(self, severity: GovernanceSeverity, mode: str) -> bool:
         normalized = mode.strip().lower() if mode else "balanced"

@@ -9,13 +9,39 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-1C3C3C.svg)](https://www.langchain.com/langgraph)
 [![Status](https://img.shields.io/badge/status-alpha%20release-brightgreen.svg)](#current-status)
 
-Legion Agents is now entering its first public alpha release: a working MVP for governed, observable AI software delivery workflows.
+Legion Agents is in active **alpha mode**: a fast-evolving MVP for governed, observable, artifact-driven AI software delivery workflows.
 
 It is a serious attempt to model how modern software delivery could work when AI agents are not treated as isolated chatbots, but as governed collaborators inside a real engineering system.
 
 It brings together specialized AI agents, architecture standards, context engineering, runtime governance, repository modification, QA validation, prompt management, observability, and live workflow visualization into one evolving platform.
 
 This project is not a toy agent demo. It is an AI-native SDLC foundation designed for experimentation, production hardening, and community evolution.
+
+---
+
+## Alpha Snapshot (2026-05-28)
+
+### What is stable enough to use now
+
+- Multi-agent workflow execution: `BA -> Architect -> Developer -> QA -> Docs -> PR`
+- Local provider workflow support (LM Studio / local OpenAI-compatible) with compact-mode controls
+- Context governor with per-agent token budgets and handoff compression
+- Architect artifact generation + finalization + quality scoring
+- Developer incremental project generation under `developer/generated_project/`
+- Artifact persistence for prompts, outputs, structured results, handoffs, generated files, and token reports
+- Governance classification with warning vs blocking behavior and non-retryable deterministic handling
+- Agent Playground + step-style artifact outputs and handoff editing support
+
+### What is still evolving
+
+- Full UI parity for every backend diagnostic (especially governance repair visuals)
+- Deeper end-to-end generated implementation quality across all stacks
+- Broader local-runtime model lifecycle coverage and provider-specific edge cases
+- Additional hardening for durability/replay under multi-process event streaming
+
+### Important alpha note
+
+For local small-context models, use compact modes and staged execution (`BA only` or `BA + Architect`) when needed. Full long workflows may still require cloud fallback depending on model/runtime limits.
 
 ---
 

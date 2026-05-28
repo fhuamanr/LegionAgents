@@ -315,6 +315,7 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
         runtime_context = runtime_context.model_copy(update={"prompt_messages": prompt_messages})
         structured_output, raw_output, pass_records = await self._run_multipass_development(runtime_context, request)
         structured_output = self._augment_with_incremental_project(request, structured_output, resolved_inputs)
+        structured_output, repair_report = self._auto_repair_governance_secrets(structured_output)
         governance_warning: str | None = None
         try:
             await self._enforce_governance_output(runtime_context, raw_output)
@@ -347,6 +348,23 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
             )
             for record in pass_records
         )
+        if repair_report.get("repair_applied"):
+            artifacts = artifacts + (
+                Artifact(
+                    id=f"developer-governance-repair-plan-{request.execution_id}",
+                    kind=ArtifactKind.GENERIC,
+                    name="governance_repair_plan.md",
+                    producer_agent=self.config.name,
+                    content=self._render_governance_repair_plan(repair_report),
+                ),
+                Artifact(
+                    id=f"developer-governance-repair-report-{request.execution_id}",
+                    kind=ArtifactKind.GENERIC,
+                    name="governance_repair_report.json",
+                    producer_agent=self.config.name,
+                    content=json.dumps(repair_report, indent=2, ensure_ascii=False),
+                ),
+            )
 
         return AgentExecutionResult(
             execution_id=request.execution_id,
@@ -362,6 +380,7 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
                 "raw_output": raw_output,
                 "pass_records": pass_records,
                 "governance_warning": governance_warning,
+                "governance_repair": repair_report,
                 "developer_input_resolution": resolution_report,
                 **self.result_metadata(structured_output),
                 **self._repository_metadata(repository_result),
@@ -826,6 +845,82 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
             "quality_report": files["generated_project/developer_quality_report.md"],
             "qa_handoff": files["generated_project/qa_handoff.md"],
         }
+
+    def _auto_repair_governance_secrets(self, output: DeveloperOutput) -> tuple[DeveloperOutput, dict[str, Any]]:
+        payload = output.model_dump(mode="json")
+        changes = list(payload.get("code_changes", [])) if isinstance(payload.get("code_changes", []), list) else []
+        findings: list[dict[str, Any]] = []
+        for item in changes:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path", "")).strip()
+            content = str(item.get("content", "") or "")
+            repaired = self._repair_secret_assignments(path, content)
+            if repaired != content:
+                item["content"] = repaired
+                findings.append(
+                    {
+                        "rule_id": "global.security.no-secret-exposure",
+                        "file_path": path,
+                        "content_type": "code",
+                        "repairable": True,
+                        "repair_applied": True,
+                    }
+                )
+        payload["code_changes"] = changes
+        repaired_output = DeveloperOutput.model_validate(payload)
+        return repaired_output, {
+            "repair_applied": bool(findings),
+            "findings": findings,
+        }
+
+    def _repair_secret_assignments(self, path: str, content: str) -> str:
+        lines: list[str] = []
+        for line in content.splitlines():
+            updated = line
+            if "=" in line and any(token in line.upper() for token in ("PASSWORD", "SECRET", "API_KEY", "TOKEN")):
+                key, value = line.split("=", 1)
+                value_clean = value.strip().strip('"').strip("'")
+                if self._is_real_secret_like(value_clean):
+                    placeholder = self._placeholder_for_key(key.strip())
+                    quote = '"' if value.strip().startswith('"') else ("'" if value.strip().startswith("'") else "")
+                    updated = f"{key}={quote}{placeholder}{quote}"
+            lines.append(updated)
+        return "\n".join(lines) + ("\n" if content.endswith("\n") and lines else "")
+
+    def _is_real_secret_like(self, value: str) -> bool:
+        lowered = (value or "").strip().lower()
+        if not lowered or lowered in {"changeme", "change-me", "placeholder", "dummy", "test", "dev", "local", "postgres", "admin"}:
+            return False
+        if lowered.startswith("<") and lowered.endswith(">"):
+            return False
+        if lowered.startswith("${") and lowered.endswith("}"):
+            return False
+        if lowered.startswith("sk-live-") or lowered.startswith("sk-"):
+            return True
+        return len(lowered) >= 10 and any(ch.isdigit() for ch in lowered) and any(ch.isalpha() for ch in lowered)
+
+    def _placeholder_for_key(self, key: str) -> str:
+        up = key.upper()
+        if "PASSWORD" in up:
+            return "<your-password>"
+        if "JWT" in up and "SECRET" in up:
+            return "<your-jwt-secret>"
+        if "API_KEY" in up:
+            return "<your-api-key>"
+        if "TOKEN" in up:
+            return "<your-token>"
+        if "SECRET" in up:
+            return "<your-secret>"
+        return "<redacted-secret>"
+
+    def _render_governance_repair_plan(self, report: dict[str, Any]) -> str:
+        lines = ["# Governance Repair Plan", "", "Deterministic secret placeholder repair applied per artifact.", ""]
+        for finding in report.get("findings", []):
+            if not isinstance(finding, dict):
+                continue
+            lines.append(f"- {finding.get('file_path','')}: repaired `global.security.no-secret-exposure`")
+        return "\n".join(lines) + "\n"
 
     def _merge_developer_outputs(self, base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
         merged = dict(base) if base else {}

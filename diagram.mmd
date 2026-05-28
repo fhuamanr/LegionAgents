@@ -1,99 +1,57 @@
 flowchart TB
-  User["User / Delivery Lead"] --> Frontend["Next.js Dashboard"]
-  Frontend --> API["FastAPI Backend"]
-  Frontend --> Snapshot["GET /dashboard/snapshot"]
-  Frontend --> LiveStart["POST /workflows/live"]
-  Frontend -. "history replay + live events" .-> ExecutionWS["/ws/executions/{workflow_id}"]
-  Frontend -. "live graph snapshots" .-> TelemetryWS["/ws/workflows/{workflow_id}/telemetry"]
+  User["User / Operator"] --> UI["Next.js Dashboard"]
+  UI --> API["FastAPI Backend"]
+  UI -. "exec stream" .-> WSExec["/ws/executions/{workflow_id}"]
+  UI -. "telemetry stream" .-> WSTelemetry["/ws/workflows/{workflow_id}/telemetry"]
 
-  API --> Uploads["PDF / DOCX / MD / TXT Uploads"]
-  API --> Chat["Workspace Chat"]
+  API --> Providers["Provider Registry + Local Runtime Controls"]
   API --> PromptStudio["Prompt Studio"]
-  API --> GovernanceEditor["Governance Editor"]
-  API --> Providers["Provider Management"]
-  API --> WorkspaceConfig["Workspace + Agent Config"]
-  API --> Graph["LangGraph Execution Runtime"]
-  API --> Observability["Logs / Metrics / Telemetry"]
-  API --> Persistence["PostgreSQL JSONB Persistence"]
+  API --> GovernanceUI["Governance Config UI"]
+  API --> Playground["Agent Playground / Step Runner"]
+  API --> WorkflowAPI["Workflow Trigger / Status / Reports"]
+  API --> ArtifactAPI["Artifact Listing + Retrieval APIs"]
 
-  Persistence --> WorkflowRecords["Workflow Records + Checkpoints"]
-  Persistence --> PromptVersions["Prompt Versions + Rollback"]
-  Persistence --> GovernanceVersions["Governance Versions + Rollback"]
-  Persistence --> WorkspaceRecords["Workspaces / Projects / Agent Config"]
-  Persistence --> ProviderRecords["LLM Provider Configs"]
-  Persistence --> UploadRecords["Upload Metadata"]
-
-  Uploads --> Ingestion["Story Ingestion Pipeline"]
-  Chat --> LiveStart
-  Ingestion --> Graph
-
-  PromptStudio --> RuntimePrompts["Active Runtime Prompts"]
-  GovernanceEditor --> RuntimePolicy["Runtime Governance Policy"]
-  RuntimePrompts --> ContextEngineering
-  RuntimePolicy --> GovernanceEngine
-
-  Graph --> BA["BA Agent"]
+  WorkflowAPI --> LangGraph["LangGraph Execution Runtime"]
+  LangGraph --> Router["Stage Router + Execution Modes"]
+  Router --> BA["BA Agent"]
   BA --> Architect["Architect Agent"]
   Architect --> Developer["Developer Agent"]
   Developer --> QA["QA Agent"]
-  QA -->|approved| Docs["Docs Agent"]
-  QA -->|rejected retry| Developer
+  QA --> Docs["Docs Agent"]
   Docs --> PR["PR Agent"]
 
-  Graph --> Runtime["Reusable Agent Runtime"]
-  Runtime --> ContextEngineering["Dynamic Context Engineering"]
-  Runtime --> GovernanceEngine["Governance Engine"]
-  Runtime --> OutputValidation["Structured Output Validation"]
-  Runtime --> TokenCallback["Token Streaming Callback"]
-  Runtime --> ProviderRegistry["Provider Registry + Model Routing"]
-  ProviderRegistry --> LLM["OpenAI / OpenRouter / Ollama / LM Studio / Custom Compatible LLM"]
+  LangGraph --> Governor["Context Governor"]
+  Governor --> Budgets["Per-Agent Prompt/Output/Handoff Budgets"]
+  Governor --> Compression["Handoff Compression + Stage Summaries"]
 
-  ContextEngineering --> RepoSummary["Repository Summary"]
-  ContextEngineering --> SemanticFiles["Semantic File Selection"]
-  ContextEngineering --> ArchitectureContext["Architecture-Aware Loading"]
-  ContextEngineering --> TokenBudget["Token Budgeting"]
-  ContextEngineering --> AgentIsolation["Agent Context Isolation"]
+  LangGraph --> Runtime["Agent Runtime"]
+  Runtime --> PromptBuilder["Prompt Builder"]
+  Runtime --> OutputRepair["Output Extraction + Repair + Normalization"]
+  Runtime --> Governance["Governance Validation + Severity Modes"]
+  Runtime --> Retry["Deterministic Retry Classifier"]
 
-  GovernanceEngine --> PromptRules["Policy Injection Into Prompts"]
-  GovernanceEngine --> RuntimeValidation["Runtime + Output Validation"]
-  GovernanceEngine --> ArchitectureRules["Architecture Enforcement"]
-  RuntimeValidation -->|reject invalid output| Graph
+  Governance --> AutoRepair["Fixable Governance Auto-Repair"]
+  AutoRepair --> Revalidate["Revalidate Repaired Artifacts"]
 
-  Providers --> ProviderRegistry
-  Providers --> ProviderRecords
+  Providers --> LocalLM["LM Studio / Ollama / Local OAI-Compatible"]
+  Providers --> CloudLLM["OpenAI / OpenRouter / Remote OAI-Compatible"]
+  Runtime --> LocalLM
+  Runtime --> CloudLLM
 
-  Developer --> RepoRuntime["Repository Runtime"]
-  RepoRuntime --> Git["Clone / Branch / Modify / Diff / Commit"]
-  Git --> PRArtifacts["Prepared PR Artifacts"]
-  PRArtifacts --> PR
+  Runtime --> RepoOps["Repository Runtime (optional)"]
+  RepoOps --> GitOps["Clone / Branch / Modify / Diff / Commit"]
 
-  QA --> QASandbox["QA Sandbox"]
-  QASandbox --> Screenshots["Screenshots"]
-  QASandbox --> Evidence["Logs / Test Evidence"]
-  Screenshots --> QA
-  Evidence --> QA
+  Runtime --> ArtifactWriter["Artifact Persistence Layer"]
+  ArtifactWriter --> ArtifactTree["data/artifacts/{workflow_id}/{agent}/..."]
+  ArtifactWriter --> Reports["Resolution / Completeness / Quality / Governance Reports"]
+  ArtifactAPI --> ArtifactTree
 
-  LLM -->|"stream_complete chunks"| TokenCallback
-  LLM --> StructuredOutputs["Generated Structured Outputs"]
-  StructuredOutputs --> OutputValidation
+  API --> Persistence["PostgreSQL JSONB Persistence"]
+  Persistence --> WorkflowState["Workflow Records + Checkpoints"]
+  Persistence --> PromptState["Prompt Versions"]
+  Persistence --> GovernanceState["Governance Versions"]
+  Persistence --> ProviderState["Provider + Model Profiles"]
 
-  Graph --> EventBus["ExecutionEventBus"]
-  TokenCallback --> TokenEvents["token_streamed events"]
-  StructuredOutputs --> OutputEvents["output_generated events"]
-  QA --> QAEvents["QA telemetry events"]
-  EventBus --> ExecutionWS
-  EventBus --> TelemetryWS
-  EventBus --> Snapshot
-  TokenEvents --> EventBus
-  OutputEvents --> EventBus
-  QAEvents --> EventBus
+  Worker["Recovery Worker"] --> Persistence
+  Worker --> LangGraph
 
-  Worker["LangGraph Recovery Worker"] --> Persistence
-  Worker --> Graph
-
-  API --> Backlog["Backlog"]
-  Backlog --> DurableEvents["Redis/Postgres durable event bus"]
-  Backlog --> HostedPRs["GitHub/GitLab PR creation"]
-  Backlog --> JiraNotion["Jira/Notion ingestion"]
-  Backlog --> ObjectStorage["MinIO artifact publishing"]
-  Backlog --> SSO["External SSO / IdP"]

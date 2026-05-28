@@ -9,6 +9,7 @@ from core.agents.llm_runtime import DeveloperRepositoryAgentRuntime
 from core.agents.runtime import AgentModelClient
 from core.runtime.models import RuntimeAgentConfig
 from core.contracts.execution import AgentExecutionRequest
+from core.contracts.outputs import DeveloperOutput
 
 
 class _FakeClient(AgentModelClient):
@@ -112,6 +113,30 @@ def test_developer_resolves_architect_inputs_from_filesystem_and_index() -> None
     assert report["source_index_used"] is True
     assert "developer_handoff.md" in resolved and resolved["developer_handoff.md"]
     assert "openapi_draft.yaml" in resolved and resolved["openapi_draft.yaml"]
+
+
+def test_developer_auto_repairs_real_secret_values() -> None:
+    runtime = _build_runtime()
+    output = DeveloperOutput.model_validate(
+        {
+            "agent_name": "developer",
+            "summary": "test",
+            "code_changes": [
+                {
+                    "path": "generated_project/.env",
+                    "change_type": "create",
+                    "description": "env",
+                    "content": "DATABASE_PASSWORD=myRealPass123\nAPI_KEY=sk-live-abcde12345\n",
+                }
+            ],
+            "tests": [],
+        }
+    )
+    repaired, report = runtime._auto_repair_governance_secrets(output)  # noqa: SLF001
+    assert report["repair_applied"] is True
+    content = repaired.model_dump(mode="json")["code_changes"][0]["content"]
+    assert "<your-password>" in content
+    assert "<your-api-key>" in content
 
 
 @pytest.mark.asyncio

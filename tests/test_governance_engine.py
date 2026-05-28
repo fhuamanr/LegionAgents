@@ -417,3 +417,71 @@ async def test_developer_controller_sql_code_can_trigger_blocking() -> None:
         structured_output=output,
     )
     assert result.valid is False
+
+
+@pytest.mark.asyncio
+async def test_env_example_placeholder_password_does_not_block() -> None:
+    engine = AgentGovernanceEngine(
+        agents_root=Path.cwd() / "agents",
+        standards_root=Path.cwd() / "repository" / "standards",
+    )
+    output = DeveloperOutput(
+        agent_name="developer",
+        summary="Env template",
+        code_changes=(
+            CodeChangeProposal(
+                path="generated_project/.env.example",
+                change_type="create",
+                description="env template",
+                content="DATABASE_PASSWORD=changeme\nPOSTGRES_PASSWORD=postgres\nJWT_SECRET=<your-jwt-secret>\n",
+            ),
+        ),
+        tests=(
+            TestGenerationProposal(
+                path="tests/test_env.py",
+                test_type="unit",
+                description="env",
+                content="def test_env(): assert True\n",
+            ),
+        ),
+    )
+    result = await engine.validate_generated_output(
+        agent_name="developer",
+        raw_output=output.model_dump_json(),
+        structured_output=output,
+    )
+    assert result.valid is True
+
+
+@pytest.mark.asyncio
+async def test_real_secret_still_blocks_without_repair() -> None:
+    engine = AgentGovernanceEngine(
+        agents_root=Path.cwd() / "agents",
+        standards_root=Path.cwd() / "repository" / "standards",
+    )
+    output = DeveloperOutput(
+        agent_name="developer",
+        summary="Real secret in source",
+        code_changes=(
+            CodeChangeProposal(
+                path="backend/src/config.py",
+                change_type="update",
+                description="bad secret",
+                content="DATABASE_PASSWORD=myRealPass123\n",
+            ),
+        ),
+        tests=(
+            TestGenerationProposal(
+                path="tests/test_cfg.py",
+                test_type="unit",
+                description="cfg",
+                content="def test_cfg(): assert True\n",
+            ),
+        ),
+    )
+    result = await engine.validate_generated_output(
+        agent_name="developer",
+        raw_output=output.model_dump_json(),
+        structured_output=output,
+    )
+    assert result.valid is False
