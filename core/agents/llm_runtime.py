@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 from typing import Any
+import os
 
 from pydantic import BaseModel
 
@@ -275,6 +276,33 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
         self._repository_runtime = repository_runtime or RepositoryRuntime()
 
     async def _execute_once(self, request: AgentExecutionRequest) -> AgentExecutionResult:
+        resolved_inputs, resolution_report, missing_required = self._resolve_architect_inputs(request)
+        if missing_required:
+            report_content = self._render_resolution_report(resolution_report)
+            return AgentExecutionResult(
+                execution_id=request.execution_id,
+                agent_name=self.config.name,
+                status=AgentStatus.FAILED,
+                summary="Developer input resolution failed before LLM execution.",
+                errors=(
+                    "schema_contract_error: developer_input_missing_required_architect_artifacts: "
+                    + ", ".join(missing_required),
+                ),
+                artifacts=(
+                    Artifact(
+                        id=f"developer-input-resolution-{request.execution_id}",
+                        kind=ArtifactKind.GENERIC,
+                        name="developer_input_resolution_report.md",
+                        producer_agent=self.config.name,
+                        content=report_content,
+                    ),
+                ),
+                metadata={
+                    "error_type": "schema_contract_error",
+                    "retry_allowed": False,
+                    "developer_input_resolution": resolution_report,
+                },
+            )
         agent_context = await self._context_assembler.assemble(request, self.config)
         tool_names = await self._tool_registry.names()
         runtime_context = RuntimeExecutionContext(
@@ -286,7 +314,7 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
         prompt_messages = await self._prompt_builder.build(runtime_context)
         runtime_context = runtime_context.model_copy(update={"prompt_messages": prompt_messages})
         structured_output, raw_output, pass_records = await self._run_multipass_development(runtime_context, request)
-        structured_output = self._augment_with_incremental_project(request, structured_output)
+        structured_output = self._augment_with_incremental_project(request, structured_output, resolved_inputs)
         governance_warning: str | None = None
         try:
             await self._enforce_governance_output(runtime_context, raw_output)
@@ -334,6 +362,7 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
                 "raw_output": raw_output,
                 "pass_records": pass_records,
                 "governance_warning": governance_warning,
+                "developer_input_resolution": resolution_report,
                 **self.result_metadata(structured_output),
                 **self._repository_metadata(repository_result),
             },
@@ -410,10 +439,10 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
         merged_structured = DeveloperOutput.model_validate(merged_payload)
         return merged_structured, "\n\n".join(all_raw_outputs), pass_records
 
-    def _augment_with_incremental_project(self, request: AgentExecutionRequest, output: DeveloperOutput) -> DeveloperOutput:
+    def _augment_with_incremental_project(self, request: AgentExecutionRequest, output: DeveloperOutput, resolved_inputs: dict[str, str]) -> DeveloperOutput:
         payload = output.model_dump(mode="json")
         metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
-        upstream = self._extract_architect_docs(request)
+        upstream = resolved_inputs
         implementation_mode = str(request.metadata.get("developer_mode", "implement_core")).strip().lower() or "implement_core"
         local_safe_mode = bool(request.metadata.get("local_lm_studio_safe_mode", False))
         passes_executed = self._passes_for_mode(implementation_mode, local_safe_mode)
@@ -469,6 +498,120 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
         if not str(payload.get("summary", "")).strip():
             payload["summary"] = "Incremental implementation package generated from architect handoff."
         return DeveloperOutput.model_validate(payload)
+
+    def _validate_required_architect_inputs(self, docs: dict[str, str]) -> None:
+        required = (
+            "developer_handoff.md",
+            "openapi_draft.yaml",
+            "backend_architecture.md",
+            "frontend_architecture.md",
+            "database_design.md",
+            "api_contracts.md",
+            "module_decomposition.md",
+        )
+        missing = [name for name in required if not str(docs.get(name, "")).strip() or len(str(docs.get(name, "")).strip()) < 24]
+        if missing:
+            raise ValueError(
+                "schema_contract_error: developer_input_missing_required_architect_artifacts: "
+                + ", ".join(missing)
+            )
+
+    def _resolve_architect_inputs(self, request: AgentExecutionRequest) -> tuple[dict[str, str], dict[str, Any], list[str]]:
+        required = (
+            "developer_handoff.md",
+            "openapi_draft.yaml",
+            "backend_architecture.md",
+            "frontend_architecture.md",
+            "database_design.md",
+            "api_contracts.md",
+            "module_decomposition.md",
+        )
+        aliases: dict[str, tuple[str, ...]] = {
+            "developer_handoff.md": ("handoff/developer_handoff.md", "developer_handoff.md"),
+            "openapi_draft.yaml": ("api/openapi_draft.yaml", "openapi_draft.yaml"),
+            "backend_architecture.md": ("backend/backend_architecture.md", "backend_architecture.md"),
+            "frontend_architecture.md": ("frontend/frontend_architecture.md", "frontend_architecture.md"),
+            "database_design.md": ("database/database_design.md", "database_design.md"),
+            "api_contracts.md": ("api/api_contracts.md", "api_contracts.md"),
+            "module_decomposition.md": ("architecture/module_decomposition.md", "module_decomposition.md"),
+        }
+        resolved: dict[str, str] = {}
+        report: dict[str, Any] = {"workflow_id": str(request.workflow_id), "required": [], "source_index_used": False}
+
+        upstream = self._extract_architect_docs(request)
+        for name in required:
+            value = str(upstream.get(name, "")).strip()
+            if value:
+                resolved[name] = value
+                report["required"].append({"name": name, "resolved_path": f"upstream:{name}", "size_bytes": len(value.encode('utf-8')), "missing_reason": "", "preview": value[:120]})
+            else:
+                report["required"].append({"name": name, "resolved_path": "", "size_bytes": 0, "missing_reason": "not found in upstream artifacts", "preview": ""})
+
+        artifacts_root = Path(os.getenv("ARTIFACT_ROOT", "data/artifacts")).resolve()
+        architect_root = artifacts_root / str(request.workflow_id) / "architect"
+        if architect_root.exists():
+            index_path = architect_root / "architect_artifact_index.json"
+            index_data: dict[str, Any] = {}
+            if index_path.exists():
+                try:
+                    index_data = json.loads(index_path.read_text(encoding="utf-8", errors="ignore"))
+                    report["source_index_used"] = True
+                except json.JSONDecodeError:
+                    index_data = {}
+            indexed_map: dict[str, str] = {}
+            artifacts_list = index_data.get("artifacts", []) if isinstance(index_data, dict) else []
+            if isinstance(artifacts_list, list):
+                for item in artifacts_list:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name", "")).strip()
+                    path = str(item.get("path", "")).strip()
+                    if name and path:
+                        indexed_map[name] = path
+            for entry in report["required"]:
+                name = entry["name"]
+                if name in resolved:
+                    continue
+                candidate_rel_paths = []
+                if name in indexed_map:
+                    candidate_rel_paths.append(indexed_map[name].replace("architect/", "", 1))
+                candidate_rel_paths.extend(list(aliases.get(name, (name,))))
+                found_path = ""
+                found_content = ""
+                for rel in candidate_rel_paths:
+                    target = architect_root / rel
+                    if target.exists() and target.is_file():
+                        content = target.read_text(encoding="utf-8", errors="ignore")
+                        if content.strip():
+                            found_path = str(target)
+                            found_content = content
+                            break
+                if found_content:
+                    resolved[name] = found_content
+                    entry["resolved_path"] = found_path
+                    entry["size_bytes"] = len(found_content.encode("utf-8"))
+                    entry["missing_reason"] = ""
+                    entry["preview"] = found_content[:120]
+                elif not entry["missing_reason"]:
+                    entry["missing_reason"] = "not found in architect artifact directory"
+
+        missing = [name for name in required if not resolved.get(name, "").strip()]
+        return resolved, report, missing
+
+    def _render_resolution_report(self, report: dict[str, Any]) -> str:
+        lines = ["# Developer Input Resolution Report", ""]
+        lines.append(f"- Workflow ID: {report.get('workflow_id', '')}")
+        lines.append(f"- Source index used: {bool(report.get('source_index_used', False))}")
+        lines.append("")
+        lines.append("| Required Artifact | Resolved Path | Bytes | Missing Reason |")
+        lines.append("|---|---|---:|---|")
+        for item in report.get("required", []):
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"| {item.get('name','')} | {item.get('resolved_path','')} | {item.get('size_bytes',0)} | {item.get('missing_reason','')} |"
+            )
+        return "\n".join(lines) + "\n"
 
     def _extract_architect_docs(self, request: AgentExecutionRequest) -> dict[str, str]:
         docs: dict[str, str] = {}
@@ -556,17 +699,33 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
             ),
             "generated_project/frontend/package.json": "{\n  \"name\": \"generated-frontend\",\n  \"private\": true,\n  \"scripts\": {\"dev\": \"vite\"}\n}\n",
             "generated_project/frontend/src/routes/Home.tsx": "export default function Home(){return <main><h1>Home</h1></main>}\n",
-            "generated_project/frontend/src/routes/Login.tsx": "export default function Login(){return <main><h1>Login/Register</h1></main>}\n",
-            "generated_project/frontend/src/routes/Catalog.tsx": "export default function Catalog(){return <main><h1>Catalog</h1></main>}\n",
-            "generated_project/frontend/src/routes/ProductDetail.tsx": "export default function ProductDetail(){return <main><h1>Product Detail</h1></main>}\n",
-            "generated_project/frontend/src/routes/Cart.tsx": "export default function Cart(){return <main><h1>Cart</h1></main>}\n",
-            "generated_project/frontend/src/routes/Checkout.tsx": "export default function Checkout(){return <main><h1>Checkout</h1></main>}\n",
-            "generated_project/frontend/src/routes/Dashboard.tsx": "export default function Dashboard(){return <main><h1>Dashboard</h1></main>}\n",
+            "generated_project/frontend/src/lib/apiClient.ts": (
+                "export async function apiGet(path:string){const r=await fetch(path); if(!r.ok) throw new Error('request failed'); return r.json();}\n"
+                "export async function apiPost(path:string, body:unknown){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok) throw new Error('request failed'); return r.json();}\n"
+            ),
+            "generated_project/frontend/src/routes/Login.tsx": (
+                "import { useState } from 'react';\nimport { apiPost } from '../lib/apiClient';\n"
+                "export default function Login(){const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const onSubmit=async(e:any)=>{e.preventDefault(); setError(''); try{await apiPost('/api/auth/login',{email,password});}catch{setError('Invalid credentials');}}; return <main><h1>Login/Register</h1><form onSubmit={onSubmit}><input value={email} onChange={e=>setEmail(e.target.value)} placeholder='email'/><input type='password' value={password} onChange={e=>setPassword(e.target.value)} placeholder='password'/><button type='submit'>Sign in</button>{error && <p role='alert'>{error}</p>}</form></main>}\n"
+            ),
+            "generated_project/frontend/src/routes/Catalog.tsx": (
+                "import { useEffect, useState } from 'react'; import { apiGet } from '../lib/apiClient';\n"
+                "type Product={id:string; title:string; price:number};\n"
+                "export default function Catalog(){const [items,setItems]=useState<Product[]>([]); const [loading,setLoading]=useState(true); const [error,setError]=useState(''); useEffect(()=>{apiGet('/api/products').then(d=>setItems(d.items||[])).catch(()=>setError('Could not load catalog')).finally(()=>setLoading(false));},[]); if(loading) return <main><p>Loading...</p></main>; if(error) return <main><p role='alert'>{error}</p></main>; if(!items.length) return <main><p>No products available.</p></main>; return <main><h1>Catalog</h1><section>{items.map(p=><article key={p.id}><h2>{p.title}</h2><p>${p.price}</p></article>)}</section></main>}\n"
+            ),
+            "generated_project/frontend/src/routes/ProductDetail.tsx": "export default function ProductDetail(){return <main><h1>Product Detail</h1><p>Shows product data, stock, and add-to-cart action.</p></main>}\n",
+            "generated_project/frontend/src/routes/Cart.tsx": "export default function Cart(){const items=[{id:'1',title:'Demo',qty:1,price:10}]; const total=items.reduce((a,i)=>a+i.qty*i.price,0); return <main><h1>Cart</h1>{items.map(i=><p key={i.id}>{i.title} x{i.qty}</p>)}<p>Total: ${total}</p></main>}\n",
+            "generated_project/frontend/src/routes/Checkout.tsx": (
+                "import { useState } from 'react'; import { apiPost } from '../lib/apiClient';\n"
+                "export default function Checkout(){const [addressId,setAddressId]=useState(''); const [paymentMethod,setPaymentMethod]=useState('card'); const [status,setStatus]=useState(''); const submit=async(e:any)=>{e.preventDefault(); setStatus('processing'); try{const r=await apiPost('/api/checkout',{address_id:addressId,payment_method:paymentMethod,idempotency_key:crypto.randomUUID()}); setStatus(`order ${r.order_id} created`);}catch{setStatus('checkout failed');}}; return <main><h1>Checkout</h1><form onSubmit={submit}><input value={addressId} onChange={e=>setAddressId(e.target.value)} placeholder='address id'/><select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}><option value='card'>card</option><option value='transfer'>transfer</option></select><button type='submit'>Pay</button></form><p>{status}</p></main>}\n"
+            ),
+            "generated_project/frontend/src/routes/Dashboard.tsx": "export default function Dashboard(){return <main><h1>Dashboard</h1><p>Orders summary, account state, and quick actions.</p></main>}\n",
             "generated_project/backend/requirements.txt": "fastapi==0.116.1\nuvicorn==0.35.0\npydantic==2.11.7\n",
             "generated_project/backend/src/main.py": (
-                "from fastapi import FastAPI\n"
+                "from fastapi import FastAPI, Request\nfrom fastapi.responses import JSONResponse\n"
                 "from .api.routes import auth, products, cart, checkout, orders\n"
                 "app = FastAPI()\n"
+                "@app.exception_handler(Exception)\n"
+                "async def unhandled(_: Request, exc: Exception):\n    return JSONResponse(status_code=500, content={'code':'internal_error','message':str(exc)})\n"
                 "@app.get('/health')\n"
                 "def health(): return {'status': 'ok'}\n"
                 "app.include_router(auth.router, prefix='/api/auth')\n"
@@ -575,12 +734,33 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
                 "app.include_router(checkout.router, prefix='/api/checkout')\n"
                 "app.include_router(orders.router, prefix='/api/orders')\n"
             ),
-            "generated_project/backend/src/api/routes/auth.py": "from fastapi import APIRouter\nrouter=APIRouter()\n@router.post('/login')\ndef login(): return {'token':'stub'}\n",
-            "generated_project/backend/src/api/routes/products.py": "from fastapi import APIRouter\nrouter=APIRouter()\n@router.get('')\ndef list_products(): return {'items': []}\n",
-            "generated_project/backend/src/api/routes/cart.py": "from fastapi import APIRouter\nrouter=APIRouter()\n@router.get('')\ndef get_cart(): return {'items': []}\n",
-            "generated_project/backend/src/api/routes/checkout.py": "from fastapi import APIRouter\nrouter=APIRouter()\n@router.post('')\ndef checkout(): return {'order_id':'stub'}\n",
-            "generated_project/backend/src/api/routes/orders.py": "from fastapi import APIRouter\nrouter=APIRouter()\n@router.get('')\ndef list_orders(): return {'items': []}\n",
-            "generated_project/backend/src/application/use_cases/checkout.py": "def run_checkout(cart_id:str)->dict:\n    return {'status':'PENDING'}\n",
+            "generated_project/backend/src/api/routes/auth.py": (
+                "from fastapi import APIRouter, HTTPException\nfrom pydantic import BaseModel, EmailStr, Field\nrouter=APIRouter()\n"
+                "class LoginRequest(BaseModel):\n    email: EmailStr\n    password: str = Field(min_length=10)\n"
+                "@router.post('/login')\ndef login(payload: LoginRequest):\n    if payload.email == 'demo@example.com' and payload.password == 'demo-password':\n        return {'access_token':'demo-token','token_type':'bearer','user':{'email':payload.email,'role':'customer'}}\n    raise HTTPException(status_code=401, detail='invalid credentials')\n"
+            ),
+            "generated_project/backend/src/api/routes/products.py": (
+                "from fastapi import APIRouter, Query\nrouter=APIRouter()\nPRODUCTS=[{'id':'p1','title':'Laptop','price':1200.0},{'id':'p2','title':'Phone','price':650.0}]\n"
+                "@router.get('')\ndef list_products(page:int=Query(1,ge=1), page_size:int=Query(20,ge=1,le=100), q:str=''):\n    items=[p for p in PRODUCTS if q.lower() in p['title'].lower()] if q else PRODUCTS\n    start=(page-1)*page_size\n    return {'items':items[start:start+page_size],'page':page,'page_size':page_size,'total':len(items)}\n"
+            ),
+            "generated_project/backend/src/api/routes/cart.py": (
+                "from fastapi import APIRouter, HTTPException\nfrom pydantic import BaseModel, Field\nrouter=APIRouter()\nCART={'id':'c1','items':[]}\n"
+                "class AddItem(BaseModel):\n    product_id: str\n    quantity: int = Field(gt=0, le=50)\n"
+                "@router.get('')\ndef get_cart():\n    total=sum(i['quantity']*i['unit_price'] for i in CART['items'])\n    return {'id':CART['id'],'items':CART['items'],'total':total}\n"
+                "@router.post('/items')\ndef add_item(payload: AddItem):\n    if payload.product_id not in {'p1','p2'}: raise HTTPException(status_code=404, detail='product not found')\n    price=1200.0 if payload.product_id=='p1' else 650.0\n    CART['items'].append({'product_id':payload.product_id,'quantity':payload.quantity,'unit_price':price})\n    return get_cart()\n"
+            ),
+            "generated_project/backend/src/api/routes/checkout.py": (
+                "from fastapi import APIRouter, HTTPException\nfrom pydantic import BaseModel, Field\nfrom ...application.use_cases.checkout import run_checkout\nrouter=APIRouter()\n"
+                "class CheckoutRequest(BaseModel):\n    address_id: str\n    payment_method: str = Field(pattern='^(card|transfer|cash_on_delivery)$')\n    idempotency_key: str = Field(min_length=8)\n"
+                "@router.post('')\ndef checkout(payload: CheckoutRequest):\n    result=run_checkout(address_id=payload.address_id,payment_method=payload.payment_method,idempotency_key=payload.idempotency_key)\n    if not result.get('ok'): raise HTTPException(status_code=409, detail=result.get('error','checkout conflict'))\n    return {'order_id': result['order_id'], 'status': result['status'], 'amount_total': result['amount_total']}\n"
+            ),
+            "generated_project/backend/src/api/routes/orders.py": "from fastapi import APIRouter\nrouter=APIRouter()\n@router.get('')\ndef list_orders():\n    return {'items':[{'order_id':'o1','status':'PAID','amount_total':1850.0}]}\n",
+            "generated_project/backend/src/application/use_cases/checkout.py": (
+                "def run_checkout(*, address_id:str, payment_method:str, idempotency_key:str)->dict:\n"
+                "    if not address_id:\n        return {'ok':False,'error':'address required'}\n"
+                "    if payment_method not in {'card','transfer','cash_on_delivery'}:\n        return {'ok':False,'error':'unsupported payment method'}\n"
+                "    order_id='ord_'+idempotency_key[-8:]\n    return {'ok':True,'order_id':order_id,'status':'PENDING','amount_total':1850.0}\n"
+            ),
             "generated_project/backend/src/domain/entities/order.py": "from dataclasses import dataclass\n@dataclass\nclass Order:\n    id:str\n    status:str\n",
             "generated_project/backend/src/domain/entities/user.py": "from dataclasses import dataclass\n@dataclass\nclass User:\n    id:str\n    email:str\n",
             "generated_project/backend/src/domain/entities/product.py": "from dataclasses import dataclass\n@dataclass\nclass Product:\n    id:str\n    sku:str\n    title:str\n",
@@ -627,9 +807,11 @@ class DeveloperRepositoryAgentRuntime(LLMStructuredAgentRuntime):
             ),
         }
         tests: dict[str, str] = {
-            "generated_project/tests/backend/test_health.py": "def test_health_placeholder():\n    assert True\n",
-            "generated_project/tests/backend/test_checkout.py": "def test_checkout_placeholder():\n    assert True\n",
-            "generated_project/tests/frontend/Catalog.test.tsx": "import { describe, it, expect } from 'vitest'; describe('Catalog',()=>{it('renders',()=>expect(true).toBe(true));});\n",
+            "generated_project/tests/backend/test_health.py": "from src.main import health\n\ndef test_health_ok():\n    data=health()\n    assert data['status'] == 'ok'\n",
+            "generated_project/tests/backend/test_products.py": "from src.api.routes.products import list_products\n\ndef test_products_returns_items():\n    data=list_products()\n    assert 'items' in data\n    assert data['total'] >= len(data['items'])\n",
+            "generated_project/tests/backend/test_cart.py": "from src.api.routes.cart import get_cart\n\ndef test_cart_has_total_key():\n    data=get_cart()\n    assert 'total' in data\n",
+            "generated_project/tests/backend/test_checkout.py": "from src.application.use_cases.checkout import run_checkout\n\ndef test_checkout_requires_address():\n    data=run_checkout(address_id='', payment_method='card', idempotency_key='abcdefgh')\n    assert data['ok'] is False\n",
+            "generated_project/tests/frontend/Catalog.test.tsx": "import { describe, it, expect } from 'vitest';\nimport Catalog from '../../frontend/src/routes/Catalog';\ndescribe('Catalog',()=>{it('is function component',()=>{expect(typeof Catalog).toBe('function');});});\n",
             "generated_project/tests/playwright/smoke.spec.ts": "import { test, expect } from '@playwright/test'; test('home', async ({ page }) => { await page.goto('http://localhost:3000'); await expect(page).toHaveTitle(/./); });\n",
         }
         if mode == "generate_tests":

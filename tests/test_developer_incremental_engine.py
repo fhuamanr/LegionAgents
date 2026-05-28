@@ -2,11 +2,13 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import os
 
 from app.services.execution_service import ExecutionService
 from core.agents.llm_runtime import DeveloperRepositoryAgentRuntime
 from core.agents.runtime import AgentModelClient
 from core.runtime.models import RuntimeAgentConfig
+from core.contracts.execution import AgentExecutionRequest
 
 
 class _FakeClient(AgentModelClient):
@@ -52,6 +54,66 @@ def test_developer_generated_project_bundle_contains_required_artifacts() -> Non
     assert "generated_project/backend/src/api/routes/checkout.py" in files
 
 
+def test_developer_requires_non_empty_architect_inputs() -> None:
+    runtime = _build_runtime()
+    with pytest.raises(ValueError, match="developer_input_missing_required_architect_artifacts"):
+        runtime._validate_required_architect_inputs(  # noqa: SLF001
+            {
+                "developer_handoff.md": "",
+                "openapi_draft.yaml": "openapi: 3.0.3",
+                "backend_architecture.md": "a",
+            }
+        )
+
+
+def test_developer_resolves_architect_inputs_from_filesystem_and_index() -> None:
+    runtime = _build_runtime()
+    workflow_id = uuid4()
+    artifact_root = Path("outputs") / f"developer-input-resolution-{uuid4()}" / "artifacts"
+    architect = artifact_root / str(workflow_id) / "architect"
+    (architect / "api").mkdir(parents=True, exist_ok=True)
+    (architect / "backend").mkdir(parents=True, exist_ok=True)
+    (architect / "frontend").mkdir(parents=True, exist_ok=True)
+    (architect / "database").mkdir(parents=True, exist_ok=True)
+    (architect / "handoff").mkdir(parents=True, exist_ok=True)
+    (architect / "architecture").mkdir(parents=True, exist_ok=True)
+    (architect / "api" / "openapi_draft.yaml").write_text("openapi: 3.0.3\ncomponents:\n  schemas:\n", encoding="utf-8")
+    (architect / "backend" / "backend_architecture.md").write_text("backend architecture detailed content", encoding="utf-8")
+    (architect / "frontend" / "frontend_architecture.md").write_text("frontend architecture detailed content", encoding="utf-8")
+    (architect / "database" / "database_design.md").write_text("database design detailed content", encoding="utf-8")
+    (architect / "api" / "api_contracts.md").write_text("api contracts detailed content", encoding="utf-8")
+    (architect / "handoff" / "developer_handoff.md").write_text("developer handoff detailed content", encoding="utf-8")
+    (architect / "architecture" / "module_decomposition.md").write_text("module decomposition detailed content", encoding="utf-8")
+    (architect / "architect_artifact_index.json").write_text(
+        "{\n"
+        '  "artifacts": [\n'
+        '    {"name":"developer_handoff.md","path":"architect/handoff/developer_handoff.md"},\n'
+        '    {"name":"openapi_draft.yaml","path":"architect/api/openapi_draft.yaml"},\n'
+        '    {"name":"backend_architecture.md","path":"architect/backend/backend_architecture.md"},\n'
+        '    {"name":"frontend_architecture.md","path":"architect/frontend/frontend_architecture.md"},\n'
+        '    {"name":"database_design.md","path":"architect/database/database_design.md"},\n'
+        '    {"name":"api_contracts.md","path":"architect/api/api_contracts.md"},\n'
+        '    {"name":"module_decomposition.md","path":"architect/architecture/module_decomposition.md"}\n'
+        "  ]\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    os.environ["ARTIFACT_ROOT"] = str(artifact_root)
+    request = AgentExecutionRequest(
+        workflow_id=workflow_id,
+        execution_id=uuid4(),
+        agent_name="developer",
+        task="Implement project",
+        upstream_artifacts=tuple(),
+        metadata={},
+    )
+    resolved, report, missing = runtime._resolve_architect_inputs(request)  # noqa: SLF001
+    assert not missing
+    assert report["source_index_used"] is True
+    assert "developer_handoff.md" in resolved and resolved["developer_handoff.md"]
+    assert "openapi_draft.yaml" in resolved and resolved["openapi_draft.yaml"]
+
+
 @pytest.mark.asyncio
 async def test_developer_artifact_persistence_writes_generated_project_tree() -> None:
     service = ExecutionService()
@@ -85,4 +147,3 @@ async def test_developer_artifact_persistence_writes_generated_project_tree() ->
     assert (root / "generated_project" / "run_instructions.md").exists()
     assert (root / "generated_project" / "tests" / "backend" / "test_health.py").exists()
     assert (root / "patch.diff").exists()
-

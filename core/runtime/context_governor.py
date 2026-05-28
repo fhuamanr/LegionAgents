@@ -110,8 +110,10 @@ class ContextGovernor:
         max_items: int = 3,
         max_chars_each: int = 320,
     ) -> tuple[Artifact, ...]:
+        # Prioritize most recent artifacts so downstream agents receive the latest stage output.
+        selected = artifacts[-max_items:] if len(artifacts) > max_items else artifacts
         compacted: list[Artifact] = []
-        for artifact in artifacts[:max_items]:
+        for artifact in selected:
             compacted.append(
                 artifact.model_copy(
                     update={

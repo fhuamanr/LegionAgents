@@ -1,5 +1,6 @@
 from core.runtime.context_governor import ContextGovernor
 from core.contracts.prompts import PromptMessage, PromptRole
+from core.contracts.artifacts import Artifact, ArtifactKind
 
 
 def test_context_governor_enforces_local_ba_budget() -> None:
@@ -36,3 +37,20 @@ def test_context_governor_compact_handoff_trims_to_budget() -> None:
         max_tokens=120,
     )
     assert governor.estimate_tokens(handoff) <= 130
+
+
+def test_context_governor_handoff_prefers_latest_artifacts() -> None:
+    governor = ContextGovernor()
+    artifacts = tuple(
+        Artifact(
+            id=f"a{i}",
+            kind=ArtifactKind.GENERIC,
+            name=f"artifact-{i}",
+            producer_agent="architect" if i >= 3 else "ba",
+            content=f"content-{i}",
+        )
+        for i in range(6)
+    )
+    compacted = governor.compact_artifacts_for_handoff(artifacts, max_items=3, max_chars_each=40)
+    names = [a.name for a in compacted]
+    assert names == ["artifact-3", "artifact-4", "artifact-5"]

@@ -1587,6 +1587,9 @@ class ExecutionService:
             return (agent_root / rel).exists()
         def read(rel: str) -> str:
             return (agent_root / rel).read_text(encoding="utf-8", errors="ignore") if exists(rel) else ""
+        def size(rel: str) -> int:
+            target = agent_root / rel
+            return target.stat().st_size if target.exists() and target.is_file() else 0
         def depth_score(text: str, *, required_tokens: tuple[str, ...], min_chars: int) -> int:
             value = (text or "").strip()
             if not value:
@@ -1608,7 +1611,31 @@ class ExecutionService:
         deployment_text = read("deployment_architecture.md")
         handoff_text = read("developer_handoff.md")
         openapi_text = read("openapi_draft.yaml")
+        artifacts_catalog = []
+        for name in (
+            "developer_handoff.md",
+            "openapi_draft.yaml",
+            "backend_architecture.md",
+            "frontend_architecture.md",
+            "database_design.md",
+            "api_contracts.md",
+            "module_decomposition.md",
+        ):
+            rel = name
+            if exists(rel):
+                artifacts_catalog.append(
+                    {
+                        "name": name,
+                        "path": f"architect/{rel}",
+                        "type": "required_input",
+                        "size_bytes": size(rel),
+                        "required_for": ["developer"],
+                    }
+                )
+
         return {
+            "agent": "architect",
+            "workflow_id": agent_root.parent.name,
             "artifacts_present": {
                 "architecture": exists("architecture.md"),
                 "module_decomposition": exists("module_decomposition.md"),
@@ -1628,6 +1655,7 @@ class ExecutionService:
             },
             "diagram_files": sorted(str(path.relative_to(agent_root)).replace("\\", "/") for path in (agent_root / "diagrams").glob("*.mmd")) if (agent_root / "diagrams").exists() else [],
             "adr_files": sorted(str(path.relative_to(agent_root)).replace("\\", "/") for path in (agent_root / "adr").glob("*.md")) if (agent_root / "adr").exists() else [],
+            "artifacts": artifacts_catalog,
             "api_endpoint_count": sum(1 for line in api_text.splitlines() if line.strip().startswith("- ") and "/" in line),
             "db_entity_mentions": sum(1 for entity in ("users", "products", "inventory", "carts", "orders", "payments") if entity in db_text.lower()),
             "depth_scores": {
