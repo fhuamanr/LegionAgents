@@ -52,17 +52,36 @@ class PolicyValidator:
         self,
         policy: GovernancePolicy,
         text: str,
+        *,
+        agent_name: str = "",
+        enforcement_mode: str = "balanced",
+        advisory_for_raw: bool = False,
     ) -> GovernanceValidationResult:
-        errors: list[str] = []
-        violations = self._forbidden_violations(policy, text, mode="strict")
-        errors.extend(v.reason for v in violations if v.blocking)
+        mode = enforcement_mode.strip().lower() or "balanced"
+        if advisory_for_raw:
+            mode = "advisory"
+        violations = self._forbidden_violations(policy, text, mode=mode)
+        violations = self._filter_false_positive_forbidden_violations(
+            violations=violations,
+            agent_name=agent_name,
+            output_text=text,
+            structured_output=None,
+            enforcement_mode=mode,
+        )
+        errors = [v.reason for v in violations if v.blocking]
+        warnings = [v.reason for v in violations if not v.blocking]
+        secret_scan_report = self._build_secret_scan_report(violations, scan_source="raw_output")
         return GovernanceValidationResult(
             valid=not errors,
             errors=tuple(errors),
+            warnings=tuple(warnings),
             metadata={
                 "validated_rule_count": len(policy.rules),
                 "forbidden_violation_count": len(violations),
+                "enforcement_mode": mode,
+                "advisory_for_raw": advisory_for_raw,
                 "violations": tuple(v.model_dump(mode="json") for v in violations),
+                "governance_secret_scan_report": secret_scan_report,
             },
         )
 
@@ -142,6 +161,7 @@ class PolicyValidator:
                 "architecture_violation_count": len(architecture_violations),
                 "enforcement_mode": mode,
                 "violations": tuple(v.model_dump(mode="json") for v in violations),
+                "governance_secret_scan_report": self._build_secret_scan_report(violations, scan_source="artifact_file"),
             },
         )
 
@@ -481,7 +501,7 @@ class PolicyValidator:
                 if path and content:
                     candidates.append((path, content, "test"))
         if not candidates:
-            candidates.append(("", output_text, "docs"))
+            candidates.append(("", output_text, "raw_output"))
 
         secret_line = self._extract_secret_assignment_line(candidates)
         if secret_line is None:
@@ -501,7 +521,7 @@ class PolicyValidator:
                     "safe_phrase_detected": True,
                 }
             )
-        if content_type in {"docs", "test"} and not self._looks_like_real_secret(value):
+        if content_type in {"docs", "test", "raw_output"} and not self._looks_like_real_secret(value):
             return violation.model_copy(
                 update={
                     "blocking": False,
@@ -523,6 +543,33 @@ class PolicyValidator:
                 "classification": "critical" if violation.severity == GovernanceSeverity.CRITICAL else ("blocking" if self._is_blocking(violation.severity, enforcement_mode) else "repairable"),
             }
         )
+
+    def _build_secret_scan_report(self, violations: list[GovernanceViolation], *, scan_source: str) -> dict[str, Any]:
+        findings: list[dict[str, Any]] = []
+        for violation in violations:
+            if "secret" not in violation.rule_id.lower() and "token" not in violation.rule_id.lower() and "credential" not in violation.rule_id.lower():
+                continue
+            key = str(violation.matched_text or "").strip()
+            if "=" in key:
+                key = key.split("=", 1)[0].strip()
+            value_classification = "placeholder_or_unknown"
+            evidence = str(violation.evidence or "")
+            if "<redacted>" in evidence:
+                value_classification = "real_or_sensitive"
+            findings.append(
+                {
+                    "scan_source": scan_source,
+                    "file_path": violation.artifact_path or "",
+                    "key": key,
+                    "value_classification": value_classification,
+                    "context_classification": violation.content_type or "unknown",
+                    "severity": str(violation.severity),
+                    "blocking": bool(violation.blocking),
+                    "repairable": bool(violation.repairable),
+                    "repair_applied": False,
+                }
+            )
+        return {"findings": findings, "count": len(findings)}
 
     def _extract_secret_assignment_line(self, candidates: list[tuple[str, str, str]]) -> tuple[str, str, str] | None:
         pattern = re.compile(r"(?im)^\s*([A-Z0-9_]*(?:PASSWORD|SECRET|API_KEY|TOKEN)[A-Z0-9_]*)\s*=\s*(.+?)\s*$")

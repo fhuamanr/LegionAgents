@@ -1307,6 +1307,12 @@ class ExecutionService:
                     json.dumps(report, indent=2, ensure_ascii=False),
                     encoding="utf-8",
                 )
+                secret_scan = report.get("governance_secret_scan_report", {})
+                if isinstance(secret_scan, dict) and secret_scan:
+                    (agent_root / "governance_secret_scan_report.json").write_text(
+                        json.dumps(secret_scan, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
             if isinstance(warnings, (list, tuple)) and warnings:
                 (agent_root / "governance_warnings.md").write_text(
                     "# Governance Warnings\n\n" + "\n".join(f"- {str(item)}" for item in warnings),

@@ -229,8 +229,15 @@ class BaseAgent(ABC, Generic[TOutput]):
         validator = PolicyValidator()
         policy_result = validator.validate_policy(policy)
         enforcement_mode = str(context.request.metadata.get("governance_enforcement_mode", "balanced")).strip().lower() or "balanced"
+        raw_advisory = structured_output is None and self.config.name == "developer"
         output_result = (
-            validator.validate_runtime_text(policy, raw_output)
+            validator.validate_runtime_text(
+                policy,
+                raw_output,
+                agent_name=self.config.name,
+                enforcement_mode=enforcement_mode,
+                advisory_for_raw=raw_advisory,
+            )
             if structured_output is None
             else validator.validate_generated_output(
                 policy,

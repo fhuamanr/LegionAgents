@@ -315,6 +315,79 @@ def test_missing_validation_mention_is_warning_not_violation_for_architect() -> 
     assert any("missing_security_consideration" in warning for warning in result.warnings)
 
 
+def test_developer_raw_secret_scan_is_advisory_not_blocking() -> None:
+    validator = PolicyValidator()
+    policy = GovernancePolicy(
+        name="runtime",
+        scope="developer",
+        rules=(
+            GovernanceRule(
+                id="global.security.no-secret-exposure",
+                description="Never expose secrets, credentials, or tokens.",
+                effect=RuleEffect.FORBID,
+                category=RuleCategory.SECURITY,
+                severity=GovernanceSeverity.BLOCKING,
+            ),
+        ),
+    )
+    result = validator.validate_runtime_text(
+        policy,
+        "DATABASE_PASSWORD=changeme\nJWT_SECRET=<your-jwt-secret>\nAPI_TOKEN=${API_TOKEN}",
+        agent_name="developer",
+        enforcement_mode="balanced",
+        advisory_for_raw=True,
+    )
+    assert result.valid is True
+    assert not result.errors
+    assert result.metadata.get("advisory_for_raw") is True
+
+
+def test_placeholder_secret_in_env_example_is_warning_not_blocking() -> None:
+    validator = PolicyValidator()
+    policy = GovernancePolicy(
+        name="runtime",
+        scope="developer",
+        rules=(
+            GovernanceRule(
+                id="global.security.no-secret-exposure",
+                description="Never expose secrets, credentials, or tokens.",
+                effect=RuleEffect.FORBID,
+                category=RuleCategory.SECURITY,
+                severity=GovernanceSeverity.BLOCKING,
+            ),
+        ),
+    )
+    output = DeveloperOutput(
+        agent_name="developer",
+        summary="Adds env example",
+        code_changes=(
+            CodeChangeProposal(
+                path=".env.example",
+                change_type="create",
+                description="Template env",
+                content="DATABASE_PASSWORD=changeme\nJWT_SECRET=<your-jwt-secret>\n",
+            ),
+        ),
+        tests=(
+            TestGenerationProposal(
+                path="tests/test_env.py",
+                test_type="unit",
+                description="env",
+                content="def test_env_template(): assert True\n",
+            ),
+        ),
+    )
+    result = validator.validate_generated_output(
+        policy=policy,
+        agent_name="developer",
+        raw_output=output.model_dump_json(),
+        structured_output=output,
+        enforcement_mode="balanced",
+    )
+    assert result.valid is True
+    assert not result.errors
+
+
 @pytest.mark.asyncio
 async def test_hardcoded_secret_still_blocks_developer() -> None:
     engine = AgentGovernanceEngine(
